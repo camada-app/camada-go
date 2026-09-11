@@ -1,0 +1,185 @@
+package camada
+
+// What only the net/http adapter can show: the request mapping, a body camada read being put
+// back, the recorder's status and stamps, the route pattern, and the lazy default engine.
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/camada/camada-go/internal/testutil"
+)
+
+func TestRequestMapping(t *testing.T) {
+	r := httptest.NewRequest("PUT", "http://h/a?x=1", strings.NewReader("abc"))
+	r.RemoteAddr = "[::ffff:1.2.3.4]:9"
+	r.Header.Set("X-Forwarded-For", "5.6.7.8")
+	r.Header.Set("Content-Type", "text/plain")
+	r.Header.Add("Cookie", "a=1")
+	r.Header.Add("Cookie", "b=2")
+	req := reqFromHTTP(r)
+	if req.Method != "PUT" || req.Path != "/a" || req.Query != "?x=1" || req.Host != "h" || req.HTTPVersion != "1.1" || req.Peer != "::ffff:1.2.3.4" || req.HTTPS {
+		t.Fatalf("%+v", req)
+	}
+	if v, _ := req.Header("x-forwarded-for"); v != "5.6.7.8" {
+		t.Fatal("xff")
+	}
+	if v, _ := req.Header("cookie"); v != "a=1; b=2" { // HTTP/2 clients split cookies into several fields
+		t.Fatalf("cookie %q", v)
+	}
+	if v, _ := req.Header("content-type"); v != "text/plain" {
+		t.Fatal("content-type")
+	}
+	if _, ok := req.Header("x-none"); ok {
+		t.Fatal("absent header present")
+	}
+	r2 := httptest.NewRequest("GET", "/", nil)
+	r2.RemoteAddr = "/var/run/app.sock"
+	if reqFromHTTP(r2).Peer != "/var/run/app.sock" { // a unix socket: the raw string, which is no ip
+		t.Fatal("unix peer")
+	}
+}
+
+func TestABodyCamadaReadIsPutBackForTheApp(t *testing.T) {
+	a := testutil.NewFakeAnalyst(t)
+	a.SetConfig("beacon", false)
+	e := engineWith(t, a, nil, Options{})
+	loaded(t, e)
+	var got []string
+	app := e.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got = append(got, string(b))
+		_, _ = w.Write([]byte("ok"))
+	}))
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/_cam/fp", strings.NewReader("{}"))
+	r.RemoteAddr = defaultPeer + ":1"
+	app.ServeHTTP(rec, r)
+	if rec.Body.String() != "ok" || len(got) != 1 || got[0] != "{}" {
+		t.Fatalf("%q %v", rec.Body.String(), got)
+	}
+}
+
+func TestABodyOverTheCapReachesTheAppWhole(t *testing.T) {
+	// no ip -> camada never answers the verify endpoint, so the app gets the request with its full body
+	e := engineWith(t, testutil.NewFakeAnalyst(t), nil, Options{})
+	loaded(t, e)
+	big := strings.Repeat("x", 70_000)
+	var got []string
+	app := e.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got = append(got, string(b))
+		_, _ = w.Write([]byte("ok"))
+	}))
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/__camada/challenge", strings.NewReader(big))
+	r.RemoteAddr = ""
+	app.ServeHTTP(rec, r)
+	if rec.Body.String() != "ok" || len(got) != 1 || got[0] != big {
+		t.Fatalf("%q len %d", rec.Body.String(), len(got))
+	}
+}
+
+func TestRoutePatternReachesTheEvent(t *testing.T) {
+	a := testutil.NewFakeAnalyst(t)
+	e := engineWith(t, a, nil, Options{})
+	loaded(t, e)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /items/{id}", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(r.PathValue("id"))) })
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/items/7", nil)
+	r.RemoteAddr = defaultPeer + ":1"
+	e.Handler(mux).ServeHTTP(rec, r)
+	if rec.Body.String() != "7" {
+		t.Fatal("route")
+	}
+	e.Queue.Flush()
+	if ev := a.AllEvents()[0]; ev["rt"] != "GET /items/{id}" {
+		t.Fatalf("%v", ev)
+	}
+}
+
+func TestStreamingResponsesFlushAndFinishOnce(t *testing.T) {
+	a := testutil.NewFakeAnalyst(t)
+	e := engineWith(t, a, nil, Options{})
+	loaded(t, e)
+	app := e.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/plain")
+		for _, part := range []string{"a", "b", "c"} {
+			_, _ = w.Write([]byte(part))
+			http.NewResponseController(w).Flush()
+		}
+	}))
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/s", nil)
+	r.RemoteAddr = defaultPeer + ":1"
+	app.ServeHTTP(rec, r)
+	if rec.Body.String() != "abc" || !rec.Flushed || rec.Header().Get("x-rid") == "" {
+		t.Fatalf("%q flushed %v", rec.Body.String(), rec.Flushed)
+	}
+	e.Queue.Flush()
+	evs := a.AllEvents()
+	if len(evs) != 1 || evs[0]["p"] != "/s" || evs[0]["st"] != 200.0 {
+		t.Fatalf("%v", evs)
+	}
+}
+
+func TestStampsSurviveAnAppThatResetsTheCookieHeader(t *testing.T) {
+	e := engineWith(t, testutil.NewFakeAnalyst(t), nil, Options{})
+	loaded(t, e)
+	app := e.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Set-Cookie", "app=1") // Set, not Add: wipes what was there
+		w.WriteHeader(204)
+	}))
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = defaultPeer + ":1"
+	app.ServeHTTP(rec, r)
+	cookies := rec.Header().Values("Set-Cookie")
+	if rec.Code != 204 || len(cookies) != 2 || rec.Header().Get("x-rid") == "" {
+		t.Fatalf("%d %v", rec.Code, cookies)
+	}
+}
+
+func TestFromRequestIsNilOutsideTheMiddleware(t *testing.T) {
+	if FromRequest(httptest.NewRequest("GET", "/", nil)) != nil {
+		t.Fatal("ctx from nowhere")
+	}
+}
+
+func TestWrapsTheDefaultEngineLazily(t *testing.T) {
+	resetDefault()
+	t.Cleanup(resetDefault)
+	t.Setenv("CAMADA_DISABLED", "1")
+	t.Setenv("CAMADA_KEY", "a.b")
+	if defaultEngine != nil {
+		t.Fatal("built before the first request")
+	}
+	rec := httptest.NewRecorder()
+	Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("x")) })).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if rec.Body.String() != "x" || !Default().Disabled() {
+		t.Fatal("default engine")
+	}
+}
+
+func TestConfigureReplacesAndStopsTheDefault(t *testing.T) {
+	resetDefault()
+	t.Cleanup(resetDefault)
+	a := testutil.NewFakeAnalyst(t)
+	first := Configure(Options{Env: testEnv, Transport: a.Transport})
+	loaded(t, first)
+	second := Configure(Options{Env: map[string]string{"CAMADA_KEY": ""}})
+	if Default() != second || second.Env != nil {
+		t.Fatal("not replaced")
+	}
+	time.Sleep(20 * time.Millisecond)
+	n := len(a.Snapshots())
+	time.Sleep(50 * time.Millisecond)
+	if len(a.Snapshots()) != n {
+		t.Fatal("the old engine kept polling")
+	}
+}
