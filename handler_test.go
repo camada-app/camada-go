@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/camada/camada-go/internal/testutil"
+	"github.com/camada/camada-go/snapshot"
 )
 
 func TestRequestMapping(t *testing.T) {
@@ -181,5 +182,51 @@ func TestConfigureReplacesAndStopsTheDefault(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if len(a.Snapshots()) != n {
 		t.Fatal("the old engine kept polling")
+	}
+}
+
+func TestAHijackedConnectionReports101(t *testing.T) {
+	a := testutil.NewFakeAnalyst(t)
+	e := engineWith(t, a, nil, Options{})
+	loaded(t, e)
+	srv := httptest.NewServer(e.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, rw, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: close\r\n\r\n")
+		_ = rw.Flush()
+		_ = conn.Close()
+	})))
+	defer srv.Close()
+	res, err := http.Get(srv.URL + "/ws")
+	if err == nil {
+		res.Body.Close()
+	}
+	e.Queue.Flush()
+	evs := a.AllEvents()
+	if len(evs) != 1 || evs[0]["p"] != "/ws" || evs[0]["st"] != 101.0 {
+		t.Fatalf("%v", evs)
+	}
+}
+
+func TestTheReadmeWarmUpWaitsForTheBootPoll(t *testing.T) {
+	// The README's startup recipe: Default() has already kicked the boot poll, so a plain Refresh()
+	// finds the lock held and returns cold; waiting on Verdict() until it is not cold is what warms it.
+	resetDefault()
+	t.Cleanup(resetDefault)
+	a := testutil.NewFakeAnalyst(t)
+	cam := Configure(Options{Env: testEnv, Transport: a.Transport})
+	t.Cleanup(func() { cam.Stop(shortCtx()) })
+	if cam.Snap == nil {
+		t.Fatal("no client")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for cam.Snap.Verdict(snapshot.MatchInput{IP: "0.0.0.0"}).Reason == "cold" && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !cam.Snap.Verdict(snapshot.MatchInput{IP: testutil.BlockedIP}).Block {
+		t.Fatal("still cold after the warm-up")
 	}
 }
