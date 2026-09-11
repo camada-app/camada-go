@@ -666,3 +666,99 @@ func TestACamadaBugCostsTheJoinNotTheRequest(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+// ---- small parts ----
+
+func TestCookieValueFindsTheNamedCookieOnly(t *testing.T) {
+	for _, c := range []struct {
+		cookie, name, want string
+		ok                 bool
+	}{
+		{"a=1; _sfp=abc; b=2", "_sfp", "abc", true},
+		{"_sfp=abc", "_sfp", "abc", true},
+		{"x_sfp=zzz; b=2", "_sfp", "", false},
+		{"", "_sfp", "", false},
+	} {
+		got, ok := cookieValue(c.cookie, c.name)
+		if got != c.want || ok != c.ok {
+			t.Errorf("cookieValue(%q, %q) = %q,%v", c.cookie, c.name, got, ok)
+		}
+	}
+}
+
+func TestReqHeaderJoinsRepeatedFields(t *testing.T) {
+	req := &Req{Headers: []Header{hdr("cookie", "a=1"), hdr("accept", "text/html"), hdr("cookie", "b=2"), hdr("accept", "*/*")}}
+	if v, _ := req.Header("cookie"); v != "a=1; b=2" {
+		t.Fatalf("cookie %q", v)
+	}
+	if v, _ := req.Header("accept"); v != "text/html, */*" {
+		t.Fatalf("accept %q", v)
+	}
+}
+
+func TestUUID4Shape(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 100; i++ {
+		u := uuid4()
+		if len(u) != 36 || u[14] != '4' || !strings.ContainsRune("89ab", rune(u[19])) || seen[u] {
+			t.Fatalf("%q", u)
+		}
+		seen[u] = true
+	}
+}
+
+func TestWantsBodyOnlyForTheEndpointsCamadaAnswers(t *testing.T) {
+	a := testutil.NewFakeAnalyst(t)
+	h := newHost(t, a, hostOpts{})
+	for _, c := range []struct {
+		method, path string
+		cap          int
+		ok           bool
+	}{
+		{"POST", "/_cam/fp", FPMax, true},
+		{"POST", "/__camada/challenge", BodyMax, true},
+		{"GET", "/_cam/fp", 0, false},
+		{"POST", "/login", 0, false},
+	} {
+		if got, ok := h.engine.WantsBody(c.method, c.path); got != c.cap || ok != c.ok {
+			t.Errorf("WantsBody(%s %s) = %d,%v", c.method, c.path, got, ok)
+		}
+	}
+	a.SetConfig("beacon", false)
+	h.engine.Snap.Refresh()
+	if _, ok := h.engine.WantsBody("POST", "/_cam/fp"); ok {
+		t.Fatal("beacon off still reads the body")
+	}
+	off := newHost(t, a, hostOpts{env: map[string]string{"CAMADA_CHALLENGE": "0"}})
+	if _, ok := off.engine.WantsBody("POST", "/__camada/challenge"); ok {
+		t.Fatal("challenge off still reads the body")
+	}
+}
+
+func TestStopDrainsThePendingBatch(t *testing.T) {
+	a := testutil.NewFakeAnalyst(t)
+	h := newHost(t, a, hostOpts{})
+	h.call(call{path: "/"})
+	if len(a.AllEvents()) != 0 {
+		t.Fatal("shipped before the interval")
+	}
+	h.engine.Stop(context.Background())
+	if evs := a.AllEvents(); len(evs) != 1 || evs[0]["p"] != "/" {
+		t.Fatalf("%v", evs)
+	}
+}
+
+func TestServerlessModeRefreshesFromTheRequestPath(t *testing.T) {
+	a := testutil.NewFakeAnalyst(t)
+	h := newHost(t, a, hostOpts{env: map[string]string{"CAMADA_SERVERLESS": "1"}})
+	if h.engine.Snap.Mode != "lazy" {
+		t.Fatalf("mode %q", h.engine.Snap.Mode)
+	}
+	if h.call(call{path: "/", peer: testutil.BlockedIP}).status != 403 {
+		t.Fatal("not enforcing")
+	}
+	pinned := newHost(t, a, hostOpts{opts: Options{Refresh: 7 * time.Second}})
+	if pinned.engine.Snap.RefreshInterval() != 7*time.Second {
+		t.Fatal("refresh not handed to the client")
+	}
+}

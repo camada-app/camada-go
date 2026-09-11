@@ -81,23 +81,24 @@ func ParseRemoteConfig(raw string) *RemoteConfig {
 		return nil
 	}
 	cfg := &RemoteConfig{}
-	if v, ok := probe["tenant"]; ok {
-		_ = json.Unmarshal(v, &cfg.Tenant)
-	}
-	if v, ok := probe["beacon"]; ok {
-		_ = json.Unmarshal(v, &cfg.Beacon)
-	}
-	if v, ok := probe["sample"]; ok {
-		_ = json.Unmarshal(v, &cfg.Sample)
-	}
-	if v, ok := probe["exclude"]; ok {
-		_ = json.Unmarshal(v, &cfg.Exclude)
-	}
-	if v, ok := probe["trusted_proxy"]; ok {
-		_ = json.Unmarshal(v, &cfg.TrustedProxy)
-	}
-	if v, ok := probe["poll_seconds"]; ok {
-		_ = json.Unmarshal(v, &cfg.PollSeconds)
-	}
+	read(probe, "tenant", &cfg.Tenant)
+	read(probe, "beacon", &cfg.Beacon)
+	read(probe, "sample", &cfg.Sample)
+	read(probe, "exclude", &cfg.Exclude)
+	read(probe, "trusted_proxy", &cfg.TrustedProxy)
+	read(probe, "poll_seconds", &cfg.PollSeconds)
 	return cfg
+}
+
+// read decodes one key into dst only when it decodes cleanly, so a junk value leaves the
+// field absent instead of half-set.
+func read[T any](probe map[string]json.RawMessage, key string, dst *T) {
+	raw, ok := probe[key]
+	if !ok {
+		return
+	}
+	var v T
+	if json.Unmarshal(raw, &v) == nil {
+		*dst = v
+	}
 }

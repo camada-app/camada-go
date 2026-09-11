@@ -36,3 +36,10 @@ func LogRateLimited(err any) {
 	mu.Unlock()
 	l.Printf("[camada] suppressed error (SDK fails open): %v", err)
 }
+
+// Reset forgets the last report so the next one is written (tests).
+func Reset() {
+	mu.Lock()
+	defer mu.Unlock()
+	last = time.Time{}
+}
