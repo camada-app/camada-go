@@ -61,7 +61,8 @@ http.ListenAndServe(":8080", cam.Handler(mux))
 
 1. Keeps the snapshot fresh. A Go server is a long-lived process, so the default is one poll
    goroutine at the cadence your tenant config sets (`poll_seconds`), with ETag/304 and gzip on
-   the wire. `CAMADA_SERVERLESS=1` switches to a per-request staleness check with no goroutine.
+   the wire. `CAMADA_SERVERLESS=1` drops the poll goroutine: each request checks staleness, and a
+   stale one kicks a single refresh off the request path.
    Every poll and event batch carries `x-camada-sdk: @camada/go/<version>`, and polls ask for
    snapshot v5 (`x-camada-snapshot: 5`) — the container that carries your ordered custom rules.
 2. Resolves the client from the socket peer (`r.RemoteAddr`), combined with `X-Forwarded-For`
@@ -122,8 +123,9 @@ camada.Track(r, "login_failed", email)   // "" when there is no identifier
 ```
 
 The identifier is HMAC-hashed in-process with your ingest token; the raw value never reaches the
-queue. `Track` never panics and is a no-op on a request the middleware did not run for. The
-event name is free-form; the analyst's app-context rules read this vocabulary:
+queue. `Track` never panics. Outside the middleware (a request it did not run for) the outcome
+still ships, with no `rid`/`sid`/`ip` to join on — and it builds the default engine if nothing
+has yet. The event name is free-form; the analyst's app-context rules read this vocabulary:
 
 | event | when |
 |---|---|

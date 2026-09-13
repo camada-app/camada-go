@@ -197,6 +197,17 @@ func TestJSRegexSpellingsAreTranslated(t *testing.T) {
 	if m2.Match(MatchInput{UA: "ab"}).Rule != "" {
 		t.Fatal("matched without the any-char")
 	}
+	// \uXXXX is a JS (and Python re) code-point escape; RE2 spells it \x{XXXX}
+	m3 := rulesSnapshot(t, []Rule{{ID: "u", Action: "block", Conds: []Cond{{F: "path", Op: "matches", V: `^/caf\u00e9/[\u0041-\u005A]$`}}}}, nil)
+	if m3.Match(MatchInput{Path: "/café/X"}).Rule != "u" {
+		t.Fatal("\\uXXXX")
+	}
+	if m3.Match(MatchInput{Path: "/cafe/X"}).Rule != "" || m3.Match(MatchInput{Path: "/café/x"}).Rule != "" {
+		t.Fatal("\\uXXXX matched the wrong code point")
+	}
+	if CompileRegex(`\u00e`) != nil || CompileRegex(`\u{1F600}`) != nil { // not four hex digits: rejected, as re rejects it
+		t.Fatal("a malformed \\u compiled")
+	}
 }
 
 func TestOneMatcherServesConcurrentRequestsWithoutCrosstalk(t *testing.T) {

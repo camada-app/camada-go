@@ -1,16 +1,18 @@
-package challenge
+package challenge_test
 
 // The SDK-served challenge (contracts §D2): a stateless per-(ip, UTC day) HMAC nonce, a 16-bit
 // SHA-256 proof of work, and an HMAC cookie bound to the ip for one hour. Ported case for case
 // from camada-core/test/challenge.test.ts via camada-python/tests/test_challenge.py.
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/camada/camada-go/challenge"
+	"github.com/camada/camada-go/internal/testutil"
 )
 
 const (
@@ -19,32 +21,22 @@ const (
 	ip  = "203.0.113.9"
 )
 
-// Solve hunts the counter whose SHA-256(nonce.counter) starts with `bits` zero bits.
-func Solve(nonce string, bits int) string {
-	for n := 0; ; n++ {
-		sum := sha256.Sum256([]byte(nonce + "." + strconv.Itoa(n)))
-		if PowOK(hex.EncodeToString(sum[:]), bits) {
-			return strconv.Itoa(n)
-		}
-	}
-}
-
 func TestNonceDeterministicPerIPAndUTCDay(t *testing.T) {
-	kit := New("secret")
+	kit := challenge.New("secret")
 	a, b := kit.Nonce(ip, now), kit.Nonce(ip, now+1000)
-	if a != b || len(a) != NonceHex {
+	if a != b || len(a) != challenge.NonceHex {
 		t.Fatalf("nonce %q vs %q", a, b)
 	}
 	if _, err := hex.DecodeString(a); err != nil {
 		t.Fatalf("not hex: %q", a)
 	}
-	if kit.Nonce("203.0.113.10", now) == a || kit.Nonce(ip, now+day) == a || New("other").Nonce(ip, now) == a {
+	if kit.Nonce("203.0.113.10", now) == a || kit.Nonce(ip, now+day) == a || challenge.New("other").Nonce(ip, now) == a {
 		t.Fatal("nonce not bound to ip, day and secret")
 	}
 }
 
 func TestNonceAcceptsTodayAndYesterdayRejectsOlderAndForgeries(t *testing.T) {
-	kit := New("secret")
+	kit := challenge.New("secret")
 	yesterday := kit.Nonce(ip, now-day)
 	if !kit.NonceValid(ip, now, kit.Nonce(ip, now)) || !kit.NonceValid(ip, now, yesterday) {
 		t.Fatal("today/yesterday refused")
@@ -65,7 +57,7 @@ func TestNonceAcceptsTodayAndYesterdayRejectsOlderAndForgeries(t *testing.T) {
 }
 
 func TestTokenRoundTripsWithinTheHourAndExpiresAfter(t *testing.T) {
-	kit := New("secret")
+	kit := challenge.New("secret")
 	tok := kit.Issue(ip, now)
 	if !kit.TokenValid(ip, now+3_599_000, tok) || kit.TokenValid(ip, now+3_600_000, tok) {
 		t.Fatal("ttl")
@@ -73,7 +65,7 @@ func TestTokenRoundTripsWithinTheHourAndExpiresAfter(t *testing.T) {
 }
 
 func TestTokenBoundToTheIPAndUnforgeable(t *testing.T) {
-	kit := New("secret")
+	kit := challenge.New("secret")
 	tok := kit.Issue(ip, now)
 	if kit.TokenValid("203.0.113.10", now, tok) {
 		t.Fatal("another ip")
@@ -97,7 +89,7 @@ func TestTokenBoundToTheIPAndUnforgeable(t *testing.T) {
 }
 
 func TestTokenRefusesAnExpiryFurtherOutThanTheTTL(t *testing.T) {
-	kit := New("secret")
+	kit := challenge.New("secret")
 	far := kit.Issue(ip, now+10_000_000) // minted "in the future": exp > now + TTL
 	if kit.TokenValid(ip, now, far) {
 		t.Fatal("accepted")
@@ -105,9 +97,9 @@ func TestTokenRefusesAnExpiryFurtherOutThanTheTTL(t *testing.T) {
 }
 
 func TestProofOfWorkAcceptsA16BitSolutionAndRejectsAnythingElse(t *testing.T) {
-	kit := New("secret")
+	kit := challenge.New("secret")
 	nonce := kit.Nonce(ip, now)
-	sol := Solve(nonce, 16)
+	sol := testutil.Solve(nonce)
 	if !kit.SolutionOK(nonce, sol) || !kit.Verify(ip, now, nonce, sol) {
 		t.Fatal("real work refused")
 	}
@@ -115,7 +107,7 @@ func TestProofOfWorkAcceptsA16BitSolutionAndRejectsAnythingElse(t *testing.T) {
 		t.Fatal("bad solution accepted")
 	}
 	forged := strings.Repeat("f", 32)
-	if kit.Verify(ip, now, forged, Solve(forged, 16)) { // a forged nonce, even with real work
+	if kit.Verify(ip, now, forged, testutil.Solve(forged)) { // a forged nonce, even with real work
 		t.Fatal("forged nonce accepted")
 	}
 }
@@ -130,66 +122,66 @@ func TestPowOKCountsLeadingZeroBits(t *testing.T) {
 		{"00007fff", 17, true}, {"0000ffff", 17, false},
 		{"0", 4, true}, {"", 4, false},
 	} {
-		if PowOK(c.hex, c.bits) != c.ok {
+		if challenge.PowOK(c.hex, c.bits) != c.ok {
 			t.Errorf("PowOK(%q, %d) != %v", c.hex, c.bits, c.ok)
 		}
 	}
 }
 
 func TestCookieString(t *testing.T) {
-	if got := Cookie("1.abc", false); got != "_cch=1.abc; Path=/; Max-Age=3600; HttpOnly; SameSite=Lax" {
+	if got := challenge.Cookie("1.abc", false); got != "_cch=1.abc; Path=/; Max-Age=3600; HttpOnly; SameSite=Lax" {
 		t.Fatalf("got %q", got)
 	}
-	if !strings.HasSuffix(Cookie("1.abc", true), "; Secure") {
+	if !strings.HasSuffix(challenge.Cookie("1.abc", true), "; Secure") {
 		t.Fatal("secure flag missing")
 	}
 }
 
 func TestSafeReturnToKeepsOnlyASameSitePath(t *testing.T) {
-	if SafeReturnTo("/a/b?c=1") != "/a/b?c=1" {
+	if challenge.SafeReturnTo("/a/b?c=1") != "/a/b?c=1" {
 		t.Fatal("a plain path was rewritten")
 	}
 	for _, bad := range []string{"", "https://evil", "//evil", `/\evil`, "/a b", "/é", "/" + strings.Repeat("a", 2048), "relative"} {
-		if got := SafeReturnTo(bad); got != "/" {
+		if got := challenge.SafeReturnTo(bad); got != "/" {
 			t.Errorf("SafeReturnTo(%q) = %q", bad, got)
 		}
 	}
 }
 
 func TestWantsHTML(t *testing.T) {
-	if !WantsHTML("text/html,*/*", "") || !WantsHTML("text/html", "document") {
+	if !challenge.WantsHTML("text/html,*/*", "") || !challenge.WantsHTML("text/html", "document") {
 		t.Fatal("html navigation refused")
 	}
-	if WantsHTML("application/json", "") || WantsHTML("text/html", "empty") || WantsHTML("", "") {
+	if challenge.WantsHTML("application/json", "") || challenge.WantsHTML("text/html", "empty") || challenge.WantsHTML("", "") {
 		t.Fatal("non-navigation accepted")
 	}
 }
 
 func TestFormBodyLastValueWinsAndNeverPanics(t *testing.T) {
-	got := ParseFormBody("a=1&b=x+y&a=2&c&%zz=%zz")
+	got := challenge.ParseFormBody("a=1&b=x+y&a=2&c&%zz=%zz")
 	if want := map[string]string{"a": "2", "b": "x y", "c": "", "%zz": "%zz"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v", got)
 	}
-	f := ParseFormBody("nonce=abc&solution=7&to=%2Fx%3Fy%3D1")
+	f := challenge.ParseFormBody("nonce=abc&solution=7&to=%2Fx%3Fy%3D1")
 	if want := map[string]string{"nonce": "abc", "solution": "7", "to": "/x?y=1"}; !reflect.DeepEqual(f, want) {
 		t.Fatalf("got %v", f)
 	}
-	if len(ParseFormBody("")) != 0 {
+	if len(challenge.ParseFormBody("")) != 0 {
 		t.Fatal("empty body")
 	}
 }
 
 func TestEscaping(t *testing.T) {
-	if got := EscapeAttr(`a<b>&"c'`); got != "a&lt;b&gt;&amp;&quot;c&#39;" {
+	if got := challenge.EscapeAttr(`a<b>&"c'`); got != "a&lt;b&gt;&amp;&quot;c&#39;" {
 		t.Fatalf("attr %q", got)
 	}
-	if got := EscapeScript("</script>"); got != `"\u003c/script>"` {
+	if got := challenge.EscapeScript("</script>"); got != `"\u003c/script>"` {
 		t.Fatalf("script %q", got)
 	}
 }
 
 func TestPageSelfContainedAndEscaped(t *testing.T) {
-	html := Page(strings.Repeat("ab", 16), "/__camada/challenge", `/x"><script>`, PowBits)
+	html := challenge.Page(strings.Repeat("ab", 16), "/__camada/challenge", `/x"><script>`, challenge.PowBits)
 	if !strings.HasPrefix(html, "<!doctype html>") {
 		t.Fatal("doctype")
 	}
@@ -208,10 +200,10 @@ func TestPageSelfContainedAndEscaped(t *testing.T) {
 }
 
 func TestDifficultyIsClamped(t *testing.T) {
-	if !strings.Contains(Page(strings.Repeat("a", 32), "/v", "/", 99), "shift=0") {
+	if !strings.Contains(challenge.Page(strings.Repeat("a", 32), "/v", "/", 99), "shift=0") {
 		t.Fatal("bits above 32")
 	}
-	if !strings.Contains(Page(strings.Repeat("a", 32), "/v", "/", 0), "shift=31") {
+	if !strings.Contains(challenge.Page(strings.Repeat("a", 32), "/v", "/", 0), "shift=31") {
 		t.Fatal("bits below 1")
 	}
 }
