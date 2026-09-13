@@ -43,7 +43,8 @@ func ScriptTag(r *http.Request) string {
 }
 
 // Track ships an app-context outcome event for this request; user (an email, an account id)
-// is HMAC-hashed in-process and may be "". Never panics; a no-op outside the middleware.
+// is HMAC-hashed in-process and may be "". Never panics. Outside the middleware the outcome
+// still ships, with no rid/sid/ip to join on (and the default engine is built if it was not yet).
 func Track(r *http.Request, event, user string) {
 	ctx := FromRequest(r)
 	engineFor(ctx).Track(ctx, event, user)
@@ -157,10 +158,7 @@ func readBody(r *http.Request, limit int) []byte {
 	if err != nil || len(read) > limit {
 		return nil
 	}
-	if read == nil {
-		read = []byte{}
-	}
-	return read
+	return read // io.ReadAll never returns nil: an empty body is []byte{}
 }
 
 func writeAnswer(w http.ResponseWriter, a *Answer) {

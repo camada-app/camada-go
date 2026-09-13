@@ -338,10 +338,14 @@ func TestRejectsOversizedPostsDeclaredOrActual(t *testing.T) {
 	if h.call(call{method: "POST", path: "/_cam/fp", body: "{}", contentLength: 40000}).status != 413 {
 		t.Fatal("declared")
 	}
-	if h.call(call{method: "POST", path: "/_cam/fp", body: "{" + strings.Repeat(" ", 33000) + "}"}).status != 413 {
+	// no declared length (chunked): only the bytes on the wire can say it is over the cap
+	if h.call(call{method: "POST", path: "/_cam/fp", body: "{" + strings.Repeat(" ", 33000) + "}", chunked: true}).status != 413 {
 		t.Fatal("actual")
 	}
-	if len(h.events()) != 0 {
+	if h.call(call{method: "POST", path: "/_cam/fp", body: "{}", chunked: true}).status != 204 {
+		t.Fatal("a chunked body under the cap")
+	}
+	if len(h.events()) != 1 {
 		t.Fatal("shipped")
 	}
 }
