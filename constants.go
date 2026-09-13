@@ -1,6 +1,6 @@
 package camada
 
-import "time"
+import "github.com/camada/camada-go/snapshot"
 
 // Tap identifier this SDK claims on the wire. The server validates against its own enum and
 // derives the capability mask itself (edge-analyst src/capabilities.js): an SDK can never grant
@@ -8,10 +8,11 @@ import "time"
 // proxy, so this literal is load-bearing.
 const TAP = "sdk-go"
 
-const DefaultRefresh = 30 * time.Second
+// The snapshot client owns these defaults; the root re-exports them so one value exists.
+const DefaultRefresh = snapshot.DefaultRefresh
 
 // 5 carries the tenant's ordered custom rules (§D3); a tenant without one is answered with the next container down.
-const DefaultSnapshotVersion = 5
+const DefaultSnapshotVersion = snapshot.DefaultSnapshotVersion
 
 const KillSwitchEnv = "CAMADA_DISABLED"
 

@@ -255,7 +255,8 @@ func CompileRegex(pattern string) *regexp.Regexp {
 }
 
 // jsToRE2 translates the JS-only spellings a tenant is likely to author: `[^]` (any char) ->
-// `[\s\S]`, `\cX` -> the control character. Anything else RE2 rejects still fails open.
+// `[\s\S]`, `\cX` -> the control character, `\uXXXX` -> `\x{XXXX}` (RE2's code-point escape;
+// Python's re reads `\uXXXX` natively, so the family agrees). Anything else RE2 rejects still fails open.
 func jsToRE2(pattern string) string {
 	var out strings.Builder
 	n, inClass := len(pattern), false
@@ -266,6 +267,11 @@ func jsToRE2(pattern string) string {
 			if nxt == 'c' && i+2 < n && isASCIILetter(pattern[i+2]) {
 				out.WriteString(regexp.QuoteMeta(string(rune(pattern[i+2]&^0x20) - 64)))
 				i += 3
+				continue
+			}
+			if nxt == 'u' && i+5 < n && isHex4(pattern[i+2:i+6]) {
+				out.WriteString(`\x{` + pattern[i+2:i+6] + `}`)
+				i += 6
 				continue
 			}
 			out.WriteString(pattern[i : i+2])
@@ -289,6 +295,16 @@ func jsToRE2(pattern string) string {
 }
 
 func isASCIILetter(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
+
+func isHex4(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+			return false
+		}
+	}
+	return true
+}
 
 // ---------- custom rules (v5) ----------
 
@@ -419,6 +435,9 @@ func compileRules(meta *Meta, v4s, v6s []Bits) []CompiledRule {
 		if !actions[r.Action] {
 			continue // an action this SDK does not know: ignore the rule rather than guess
 		}
+		if len(r.Conds) == 0 {
+			continue // a rule with no conditions would match everything
+		}
 		var v4, v6 []Bits
 		for _, s := range v4s {
 			if int(s[0]) == i {
@@ -439,9 +458,6 @@ func compileRules(meta *Meta, v4s, v6s []Bits) []CompiledRule {
 				sets[k][1] = v6[k]
 			}
 		}
-		if len(r.Conds) == 0 {
-			continue // a rule with no conditions would match everything
-		}
 		conds := make([]RuleCond, 0, len(r.Conds))
 		for _, c := range r.Conds {
 			conds = append(conds, compileCond(c, &sets))
@@ -451,11 +467,11 @@ func compileRules(meta *Meta, v4s, v6s []Bits) []CompiledRule {
 	return out
 }
 
-func words(binary_ []byte) Bits {
-	usable := len(binary_) - len(binary_)%4 // a trailing partial word is dropped, as the Uint32Array view does
+func words(raw []byte) Bits {
+	usable := len(raw) - len(raw)%4 // a trailing partial word is dropped, as the Uint32Array view does
 	u := make(Bits, usable/4)
 	for i := range u {
-		u[i] = binary.LittleEndian.Uint32(binary_[i*4:])
+		u[i] = binary.LittleEndian.Uint32(raw[i*4:])
 	}
 	return u
 }
@@ -474,15 +490,15 @@ func fixed(s Bits, n int) (Bits, error) {
 
 // ParseSnapshot parses a BLK container + meta into a Snapshot. It errors on a malformed
 // container — callers keep the previous snapshot, exactly like the edge collector does.
-func ParseSnapshot(binary_ []byte, meta *Meta) (*Snapshot, error) {
+func ParseSnapshot(raw []byte, meta *Meta) (*Snapshot, error) {
 	if meta == nil {
 		meta = &Meta{}
 	}
-	u := words(binary_)
+	u := words(raw)
 	if len(u) < 2 {
 		return nil, errors.New("camada: not a BLK3 snapshot")
 	}
-	fmt_, ok := formats[u[0]]
+	format, ok := formats[u[0]]
 	if !ok {
 		return nil, errors.New("camada: not a BLK3 snapshot")
 	}
@@ -536,7 +552,7 @@ func ParseSnapshot(binary_ []byte, meta *Meta) (*Snapshot, error) {
 	s6 := sec[5]
 	return &Snapshot{
 		Version: meta.Version,
-		Format:  fmt_,
+		Format:  format,
 		S4:      sec[1], E4: sec[2], Idx4: idx4, Bm4: bm4,
 		S6: s6, E6: sec[6], N6: len(s6) / 4, Bm6: bm6,
 		ASNBm: asnBm, ASNExtra: sec[9],

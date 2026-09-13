@@ -76,12 +76,18 @@ func TestABodyOverTheCapReachesTheAppWhole(t *testing.T) {
 		got = append(got, string(b))
 		_, _ = w.Write([]byte("ok"))
 	}))
-	rec := httptest.NewRecorder()
-	r := httptest.NewRequest("POST", "/__camada/challenge", strings.NewReader(big))
-	r.RemoteAddr = ""
-	app.ServeHTTP(rec, r)
-	if rec.Body.String() != "ok" || len(got) != 1 || got[0] != big {
-		t.Fatalf("%q len %d", rec.Body.String(), len(got))
+	for _, chunked := range []bool{false, true} { // declared over the cap, and over it only once read
+		rec := httptest.NewRecorder()
+		r := httptest.NewRequest("POST", "/__camada/challenge", strings.NewReader(big))
+		r.RemoteAddr = ""
+		if chunked {
+			r.ContentLength = -1
+		}
+		app.ServeHTTP(rec, r)
+		if rec.Body.String() != "ok" || len(got) != 1 || got[0] != big {
+			t.Fatalf("chunked=%v: %q len %d", chunked, rec.Body.String(), len(got))
+		}
+		got = nil
 	}
 }
 

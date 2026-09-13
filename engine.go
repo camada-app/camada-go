@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -149,7 +150,6 @@ type Camada struct {
 
 	getenv      func(string) string
 	challengeOn bool
-	now         func() int64
 	decide      func(req *Req, body []byte) (*Answer, *Passed)
 }
 
@@ -163,7 +163,7 @@ func New(o Options) *Camada {
 	}
 	c := &Camada{
 		ScriptPath: o.ScriptPath, FPPath: o.FPPath, ChallengePath: o.ChallengePath,
-		getenv: getenv, now: events.NowMS,
+		getenv: getenv,
 	}
 	c.decide = c.decideRequest
 	if c.ScriptPath == "" {
@@ -203,7 +203,7 @@ func (c *Camada) Disabled() bool {
 }
 
 // NowMS is the engine's clock in milliseconds since the epoch.
-func (c *Camada) NowMS() int64 { return c.now() }
+func (c *Camada) NowMS() int64 { return events.NowMS() }
 
 func (c *Camada) trustedProxy() *TrustedProxy {
 	if c.Env != nil && c.Env.TrustedProxy != nil {
@@ -256,7 +256,6 @@ func (c *Camada) decideRequest(req *Req, body []byte) (*Answer, *Passed) {
 	if c.Disabled() {
 		return nil, inert
 	}
-	queue := c.Queue
 	t0 := time.Now()
 	c.Snap.EnsureFresh()
 	ip := c.ip(req)
@@ -265,7 +264,7 @@ func (c *Camada) decideRequest(req *Req, body []byte) (*Answer, *Passed) {
 	// custom rules read the user agent and the request headers (§D3).
 	v := c.Snap.Verdict(snapshot.MatchInput{IP: ip, Path: req.Path, UA: req.header("user-agent"), Header: req.Header})
 	if v.Block {
-		headers := headers(hdr("content-type", "text/plain"), hdr("x-block-reason", v.Reason), hdr("x-block-version", v.Version))
+		headers := []Header{hdr("content-type", "text/plain"), hdr("x-block-reason", v.Reason), hdr("x-block-version", v.Version)}
 		if v.Rule != "" {
 			headers = append(headers, hdr("x-block-rule", v.Rule)) // a custom rule blocked: name it, so the customer knows which row to edit
 		}
@@ -275,7 +274,7 @@ func (c *Camada) decideRequest(req *Req, body []byte) (*Answer, *Passed) {
 		if v.Rule != "" {
 			ev["rl"] = v.Rule
 		}
-		queue.Push(ev)
+		c.Queue.Push(ev)
 		return &Answer{403, headers, []byte("Forbidden")}, nil
 	}
 	// `warn` passes the request and only marks its event (below, on finish); a skip passes
@@ -297,7 +296,7 @@ func (c *Camada) decideRequest(req *Req, body []byte) (*Answer, *Passed) {
 
 	if c.beaconEnabled() {
 		if req.Method == "GET" && req.Path == c.ScriptPath {
-			return &Answer{200, headers(hdr("content-type", "application/javascript"), hdr("cache-control", "public, max-age=3600")), []byte(beacon.JS())}, nil
+			return &Answer{200, []Header{hdr("content-type", "application/javascript"), hdr("cache-control", "public, max-age=3600")}, []byte(beacon.JS())}, nil
 		}
 		if req.Method == "POST" && req.Path == c.FPPath {
 			return c.relayBeacon(body, ip), nil
@@ -310,7 +309,7 @@ func (c *Camada) decideRequest(req *Req, body []byte) (*Answer, *Passed) {
 	setCookie := ""
 	if newSession {
 		sid = uuid4()
-		setCookie = SessionCookie + "=" + sid + "; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax"
+		setCookie = SessionCookie + "=" + sid + "; Path=/; Max-Age=" + strconv.Itoa(SessionMaxAge) + "; HttpOnly; SameSite=Lax"
 		if req.HTTPS || req.header("x-forwarded-proto") == "https" {
 			setCookie += "; Secure"
 		}
@@ -355,7 +354,7 @@ func (c *Camada) decideRequest(req *Req, body []byte) (*Answer, *Passed) {
 		if warnRule != "" {
 			ev["wrn"] = warnRule // §D3: the warn rule that let this request through
 		}
-		queue.Push(ev)
+		c.Queue.Push(ev)
 	}
 	return nil, &Passed{RID: rid, SetCookie: setCookie, Ctx: ctx, OnFinish: onFinish}
 }
@@ -373,7 +372,7 @@ func (c *Camada) relayBeacon(body []byte, ip string) *Answer {
 	if body == nil {
 		return &Answer{413, nil, []byte{}}
 	}
-	answer := &Answer{204, headers(hdr("cache-control", "no-store")), []byte{}}
+	answer := &Answer{204, []Header{hdr("cache-control", "no-store")}, []byte{}}
 	var parsed map[string]any
 	if err := json.Unmarshal(body, &parsed); err != nil || parsed == nil {
 		return answer
@@ -403,12 +402,12 @@ func (c *Camada) ScriptTag(ctx *Ctx) string {
 
 func (c *Camada) challengePassed(req *Req, ip string) bool {
 	cch, _ := cookieValue(req.header("cookie"), challenge.CookieName)
-	return c.Kit != nil && c.Kit.TokenValid(ip, c.now(), cch)
+	return c.Kit != nil && c.Kit.TokenValid(ip, c.NowMS(), cch)
 }
 
 func (c *Camada) page(ip, to string) *Answer {
-	html := challenge.Page(c.Kit.Nonce(ip, c.now()), c.ChallengePath, to, challenge.PowBits)
-	headers := headers(hdr("content-type", "text/html; charset=utf-8"), hdr("cache-control", "no-store"), hdr("x-camada-challenge", "1"))
+	html := challenge.Page(c.Kit.Nonce(ip, c.NowMS()), c.ChallengePath, to, challenge.PowBits)
+	headers := []Header{hdr("content-type", "text/html; charset=utf-8"), hdr("cache-control", "no-store"), hdr("x-camada-challenge", "1")}
 	return &Answer{403, headers, []byte(html)}
 }
 
@@ -420,7 +419,7 @@ func (c *Camada) serveChallenge(req *Req, ip, sid string) *Answer {
 	if challenge.WantsHTML(req.header("accept"), req.header("sec-fetch-dest")) {
 		answer = c.page(ip, to)
 	} else {
-		headers := headers(hdr("content-type", "application/json"), hdr("cache-control", "no-store"), hdr("x-camada-challenge", "1"))
+		headers := []Header{hdr("content-type", "application/json"), hdr("cache-control", "no-store"), hdr("x-camada-challenge", "1")}
 		answer = &Answer{403, headers, []byte(`{"error":"challenge_required"}`)}
 	}
 	func() {
@@ -444,13 +443,13 @@ func (c *Camada) verify(req *Req, body []byte, ip string) *Answer {
 	}
 	form := challenge.ParseFormBody(string(body))
 	to := challenge.SafeReturnTo(form["to"])
-	now := c.now()
+	now := c.NowMS()
 	if !c.Kit.Verify(ip, now, form["nonce"], form["solution"]) {
 		return c.page(ip, to)
 	}
 	secure := req.HTTPS || req.header("x-forwarded-proto") == "https"
 	cookie := challenge.Cookie(c.Kit.Issue(ip, now), secure)
-	headers := headers(hdr("location", to), hdr("set-cookie", cookie), hdr("cache-control", "no-store"))
+	headers := []Header{hdr("location", to), hdr("set-cookie", cookie), hdr("cache-control", "no-store")}
 	sid, _ := cookieValue(req.header("cookie"), SessionCookie)
 	ev := c.event(req, uuid4(), sid, false, ip)
 	ev["st"], ev["ch"] = 200, 1 // challenge passed (contract §A3 ingest field)
@@ -488,15 +487,19 @@ func (c *Camada) Track(ctx *Ctx, event, user string) {
 	if c.Disabled() {
 		return
 	}
-	row := map[string]any{"tap": TAP, "et": event, "uid": nil, "rid": nil, "sid": nil, "ip": nil, "ts": c.now()}
+	row := map[string]any{"tap": TAP, "et": event, "uid": nil, "rid": nil, "sid": nil, "ip": nil, "ts": c.NowMS()}
 	if user != "" {
 		row["uid"] = HashUserID(user, c.Env.IngestToken)
 	}
 	if ctx != nil {
-		for k, v := range map[string]string{"rid": ctx.RID, "sid": ctx.SID, "ip": ctx.IP} {
-			if v != "" {
-				row[k] = v
-			}
+		if ctx.RID != "" {
+			row["rid"] = ctx.RID
+		}
+		if ctx.SID != "" {
+			row["sid"] = ctx.SID
+		}
+		if ctx.IP != "" {
+			row["ip"] = ctx.IP
 		}
 	}
 	c.Queue.Push(row)
@@ -518,5 +521,3 @@ func (c *Camada) Stop(ctx context.Context) {
 }
 
 func hdr(name, value string) Header { return Header{Name: name, Value: value} }
-
-func headers(hs ...Header) []Header { return hs }

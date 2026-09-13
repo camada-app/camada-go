@@ -17,6 +17,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"math"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -191,7 +192,7 @@ func (c *Client) load() error {
 		headers["x-camada-sdk"] = c.SDK
 	}
 	if c.SnapshotVersion > 3 {
-		headers["x-camada-snapshot"] = itoa(c.SnapshotVersion) // a tenant without that container is answered with the next one down
+		headers["x-camada-snapshot"] = strconv.Itoa(c.SnapshotVersion) // a tenant without that container is answered with the next one down
 	}
 	res := c.Transport(transport.Request{Method: "GET", URL: c.URL, Headers: headers, Timeout: c.Timeout})
 	if res.Status != 200 && res.Status != 204 && res.Status != 304 {
@@ -266,11 +267,4 @@ func (c *Client) Verdict(i MatchInput) MatchResult {
 		return None
 	}
 	return m.Match(i)
-}
-
-func itoa(n int) string {
-	if n >= 0 && n < 10 {
-		return string(rune('0' + n))
-	}
-	return itoa(n/10) + string(rune('0'+n%10))
 }

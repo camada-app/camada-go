@@ -149,7 +149,7 @@ func unquote(s string) string {
 	}
 	var out []byte
 	for i := 0; i < len(s); i++ {
-		if s[i] == '%' && i+2 < len(s)+0 && isHex(s[i+1]) && isHex(s[i+2]) {
+		if s[i] == '%' && i+2 < len(s) && isHex(s[i+1]) && isHex(s[i+2]) {
 			b, _ := strconv.ParseUint(s[i+1:i+3], 16, 8)
 			out = append(out, byte(b))
 			i += 2

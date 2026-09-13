@@ -27,7 +27,8 @@ type call struct {
 	body          string
 	peer          string // "" = defaultPeer; "-" = no peer at all (a unix socket)
 	https         bool
-	contentLength int // override the declared length; 0 = actual
+	contentLength int  // override the declared length; 0 = actual
+	chunked       bool // no Content-Length at all (a chunked or proxied body): the SDK must count bytes
 }
 
 type reply struct {
@@ -127,10 +128,14 @@ func (h *host) request(c call) *http.Request {
 	for _, kv := range c.headers {
 		r.Header.Add(kv[0], kv[1])
 	}
-	if c.contentLength != 0 {
+	switch {
+	case c.chunked:
+		r.ContentLength = -1 // httptest sets the length from a strings.Reader; -1 is "unknown", as net/http reads a chunked body
+		r.Header.Set("Transfer-Encoding", "chunked")
+	case c.contentLength != 0:
 		r.ContentLength = int64(c.contentLength)
 		r.Header.Set("Content-Length", strconv.Itoa(c.contentLength))
-	} else if c.method == "POST" || c.body != "" {
+	case c.method == "POST" || c.body != "":
 		r.Header.Set("Content-Length", strconv.Itoa(len(c.body)))
 	}
 	return r
