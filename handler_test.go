@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/camada/camada-go/internal/testutil"
-	"github.com/camada/camada-go/snapshot"
+	"github.com/camada-app/camada-go/internal/testutil"
+	"github.com/camada-app/camada-go/snapshot"
 )
 
 func TestRequestMapping(t *testing.T) {

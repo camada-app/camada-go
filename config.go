@@ -1,6 +1,6 @@
 package camada
 
-import "github.com/camada/camada-go/internal/config"
+import "github.com/camada-app/camada-go/internal/config"
 
 // TrustedProxy is the tenant's trusted-proxy config: {mode: none} | {mode: hops, hops: N} |
 // {mode: cidrs, cidrs: [...]} | {mode: vercel}. CAMADA_TRUSTED_PROXY overrides it locally.

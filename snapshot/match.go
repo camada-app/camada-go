@@ -16,7 +16,7 @@ package snapshot
 import (
 	"strings"
 
-	"github.com/camada/camada-go/internal/ipparse"
+	"github.com/camada-app/camada-go/internal/ipparse"
 )
 
 // MatchInput is one request as the tap sees it. ASN 0 means unknown (AS0 is reserved).

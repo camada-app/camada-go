@@ -1,6 +1,6 @@
 package camada
 
-import "github.com/camada/camada-go/snapshot"
+import "github.com/camada-app/camada-go/snapshot"
 
 // Tap identifier this SDK claims on the wire. The server validates against its own enum and
 // decides itself what each tap can see: an SDK can never grant

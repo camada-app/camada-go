@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/camada/camada-go/internal/guarded"
+	"github.com/camada-app/camada-go/internal/guarded"
 )
 
 func TestLogRateLimitedWritesOneLineAMinute(t *testing.T) {

@@ -1,6 +1,6 @@
 package camada
 
-import "github.com/camada/camada-go/internal/redact"
+import "github.com/camada-app/camada-go/internal/redact"
 
 // ScrubQuery replaces credential-looking query values with ~r, preserving structure and order.
 func ScrubQuery(query string) string { return redact.ScrubQuery(query) }

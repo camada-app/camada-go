@@ -16,8 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/camada/camada-go/internal/guarded"
-	"github.com/camada/camada-go/internal/transport"
+	"github.com/camada-app/camada-go/internal/guarded"
+	"github.com/camada-app/camada-go/internal/transport"
 )
 
 const (

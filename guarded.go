@@ -3,7 +3,7 @@ package camada
 import (
 	"log"
 
-	"github.com/camada/camada-go/internal/guarded"
+	"github.com/camada-app/camada-go/internal/guarded"
 )
 
 // SetLogger routes the SDK's one-line-a-minute error report somewhere other than log.Default().
