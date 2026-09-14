@@ -28,11 +28,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/camada/camada-go/challenge"
-	"github.com/camada/camada-go/events"
-	"github.com/camada/camada-go/internal/beacon"
-	"github.com/camada/camada-go/internal/guarded"
-	"github.com/camada/camada-go/snapshot"
+	"github.com/camada-app/camada-go/challenge"
+	"github.com/camada-app/camada-go/events"
+	"github.com/camada-app/camada-go/internal/beacon"
+	"github.com/camada-app/camada-go/internal/guarded"
+	"github.com/camada-app/camada-go/snapshot"
 )
 
 // Header is one request or response header; request names arrive lower-cased.

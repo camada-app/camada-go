@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/camada/camada-go/internal/testutil"
+	"github.com/camada-app/camada-go/internal/testutil"
 )
 
 func req(headers []Header, query, ip string) RequestInfo {

@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"strconv"
 
-	"github.com/camada/camada-go/challenge"
+	"github.com/camada-app/camada-go/challenge"
 )
 
 // Solve hunts the counter whose SHA-256("<nonce>.<counter>") starts with challenge.PowBits zero

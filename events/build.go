@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/camada/camada-go/internal/redact"
+	"github.com/camada-app/camada-go/internal/redact"
 )
 
 // HDRS is the header-presence bitmask order, pinned by camada-core/test/fixtures/blk3/hdrs.json.

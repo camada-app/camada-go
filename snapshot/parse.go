@@ -34,7 +34,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/camada/camada-go/internal/ipparse"
+	"github.com/camada-app/camada-go/internal/ipparse"
 )
 
 // Bits is a uint32 word view of one container section.

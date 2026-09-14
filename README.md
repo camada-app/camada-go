@@ -14,7 +14,7 @@ packages (SDK-G01). Go 1.23 or newer, no dependencies outside the standard libra
 ## Quickstart
 
 ```go
-import "github.com/camada/camada-go"
+import "github.com/camada-app/camada-go"
 
 mux := http.NewServeMux()
 mux.HandleFunc("GET /{$}", home)
@@ -37,7 +37,7 @@ and wait for the boot poll — `Snap.Refresh()` alone is not it, the boot poll a
 single-in-flight lock:
 
 ```go
-import "github.com/camada/camada-go/snapshot"
+import "github.com/camada-app/camada-go/snapshot"
 
 cam := camada.Default()   // builds the engine; the boot poll is already running on its goroutine
 if cam.Snap != nil {      // nil when CAMADA_KEY is unset or CAMADA_DISABLED=1

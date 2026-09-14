@@ -18,7 +18,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/camada/camada-go/internal/guarded"
+	"github.com/camada-app/camada-go/internal/guarded"
 )
 
 type ctxKey struct{}

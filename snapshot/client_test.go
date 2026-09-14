@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/camada/camada-go/internal/testutil"
-	"github.com/camada/camada-go/internal/transport"
+	"github.com/camada-app/camada-go/internal/testutil"
+	"github.com/camada-app/camada-go/internal/transport"
 )
 
 const url = "https://analyst.test/snapshot"

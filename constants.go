@@ -1,6 +1,6 @@
 package camada
 
-import "github.com/camada/camada-go/snapshot"
+import "github.com/camada-app/camada-go/snapshot"
 
 // Tap identifier this SDK claims on the wire. The server validates against its own enum and
 // derives the capability mask itself (edge-analyst src/capabilities.js): an SDK can never grant
