@@ -1,6 +1,6 @@
 package camada
 
-import "github.com/camada/camada-go/internal/transport"
+import "github.com/camada-app/camada-go/internal/transport"
 
 // HTTPRequest is one call to the analyst, as the Transport seam sees it.
 type HTTPRequest = transport.Request

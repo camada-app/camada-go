@@ -1,6 +1,6 @@
 package camada
 
-import "github.com/camada/camada-go/internal/ipparse"
+import "github.com/camada-app/camada-go/internal/ipparse"
 
 // Words is an IPv6 address as four big-endian uint32 words, the form the BLK container stores.
 type Words = ipparse.Words

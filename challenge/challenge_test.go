@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/camada/camada-go/challenge"
-	"github.com/camada/camada-go/internal/testutil"
+	"github.com/camada-app/camada-go/challenge"
+	"github.com/camada-app/camada-go/internal/testutil"
 )
 
 const (

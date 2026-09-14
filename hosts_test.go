@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/camada/camada-go/internal/testutil"
-	"github.com/camada/camada-go/snapshot"
+	"github.com/camada-app/camada-go/internal/testutil"
+	"github.com/camada-app/camada-go/snapshot"
 )
 
 var testEnv = map[string]string{"CAMADA_KEY": "tok-test.snap-test", "CAMADA_INGEST_URL": "https://analyst.test"}
