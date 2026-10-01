@@ -4,7 +4,7 @@ package camada
 // single source: the git tag is the release version, and the sibling drift guards (camada-backend,
 // camada-web, camada-mkt) parse this file the way they parse a package.json. Plain X.Y.Z only:
 // the analyst's SDK_RE drops anything else.
-const Version = "0.1.1"
+const Version = "0.1.2"
 
 // SDKID rides every snapshot poll and event batch as x-camada-sdk.
 const SDKID = "@camada/go/" + Version

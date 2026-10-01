@@ -42,36 +42,8 @@ type MatchResult struct {
 	Version   string
 }
 
-// CleanPath strips the query from a path.
-func CleanPath(raw string) string {
-	if raw == "" {
-		return "/"
-	}
-	if q := strings.IndexByte(raw, '?'); q != -1 {
-		return raw[:q]
-	}
-	return raw
-}
-
-// prefixHit walks every '/'-terminated ancestor of `path`, the way the block side does.
-func prefixHit(prefixes map[string]struct{}, path string) bool {
-	for i := indexFrom(path, '/', 1); i != -1; i = indexFrom(path, '/', i+1) {
-		if _, ok := prefixes[path[:i+1]]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-func indexFrom(s string, c byte, from int) int {
-	if from >= len(s) {
-		return -1
-	}
-	if j := strings.IndexByte(s[from:], c); j != -1 {
-		return from + j
-	}
-	return -1
-}
+// CleanPath strips the query (and any fragment) from a path.
+func CleanPath(raw string) string { return stripQuery(raw) }
 
 // ruleResult: a rule decided this request (§D3): at most one of allowed / block / challenge /
 // warn is true, Reason is "rule", and Rule names the id the adapters stamp on the event.
@@ -161,24 +133,13 @@ func (m *Matcher) blockedASN(asn int) bool {
 	return false
 }
 
-func (m *Matcher) blockedPath(path string) bool {
+func (m *Matcher) blockedPath(forms *[3]string) bool {
 	s := m.Snap
-	if _, ok := s.PathsExact[path]; ok {
-		return true
-	}
-	if len(s.PathsPrefix) > 0 && prefixHit(s.PathsPrefix, path) {
-		return true
-	}
-	for _, rx := range s.PathsRegex {
-		if rx.MatchString(path) {
-			return true
-		}
-	}
-	return false
+	return pathHit(func(p string) bool { return pathIn(s.PathsExact, s.PathsPrefix, s.PathsRegex, p) }, forms, true)
 }
 
 // blockSide is the block side: v3 sections plus the top-level meta.
-func (m *Matcher) blockSide(i *MatchInput, n4 uint32, has4 bool, w Words, has6 bool) string {
+func (m *Matcher) blockSide(i *MatchInput, forms *[3]string, n4 uint32, has4 bool, w Words, has6 bool) string {
 	s := m.Snap
 	if has4 && m.blocked4(n4) {
 		return "ip4"
@@ -195,14 +156,15 @@ func (m *Matcher) blockSide(i *MatchInput, n4 uint32, has4 bool, w Words, has6 b
 	if _, ok := s.TLS[i.TLSX]; ok && i.TLSX != "" {
 		return "tls"
 	}
-	if (len(s.PathsExact) > 0 || len(s.PathsPrefix) > 0 || len(s.PathsRegex) > 0) && m.blockedPath(CleanPath(i.Path)) {
+	if (len(s.PathsExact) > 0 || len(s.PathsPrefix) > 0 || len(s.PathsRegex) > 0) && m.blockedPath(forms) {
 		return "path"
 	}
 	return ""
 }
 
 // side is a v4 side list (allow or challenge). No tls axis: §A3's side meta has no tls key.
-func side(st *RangeSet, i *MatchInput, n4 uint32, has4 bool, w Words, has6 bool) string {
+// deny is false for the allow side: an exemption needs every canonical spelling of the path.
+func side(st *RangeSet, i *MatchInput, forms *[3]string, deny bool, n4 uint32, has4 bool, w Words, has6 bool) string {
 	if st.Empty {
 		return "" // the common v3 snapshot
 	}
@@ -218,14 +180,9 @@ func side(st *RangeSet, i *MatchInput, n4 uint32, has4 bool, w Words, has6 bool)
 	if _, ok := st.Country[i.Country]; ok && i.Country != "" {
 		return "country"
 	}
-	if len(st.PathsExact) > 0 || len(st.PathsPrefix) > 0 {
-		p := CleanPath(i.Path)
-		if _, ok := st.PathsExact[p]; ok {
-			return "path"
-		}
-		if len(st.PathsPrefix) > 0 && prefixHit(st.PathsPrefix, p) {
-			return "path"
-		}
+	if (len(st.PathsExact) > 0 || len(st.PathsPrefix) > 0) &&
+		pathHit(func(p string) bool { return pathIn(st.PathsExact, st.PathsPrefix, nil, p) }, forms, deny) {
+		return "path"
 	}
 	return ""
 }
@@ -243,8 +200,9 @@ func (m *Matcher) Match(i MatchInput) MatchResult {
 			w, has6 = ParseIP6(i.IP)
 		}
 	}
+	forms := PathForms(i.Path) // [raw, lit, full]: see path.go
 	if len(s.Rules) > 0 {
-		r := RuleRequest{N4: n4, HasIP4: has4, IP6: w, HasIP6: has6, ASN: i.ASN, Country: i.Country, TLSX: i.TLSX, Path: CleanPath(i.Path), UA: i.UA, Header: i.Header}
+		r := RuleRequest{N4: n4, HasIP4: has4, IP6: w, HasIP6: has6, ASN: i.ASN, Country: i.Country, TLSX: i.TLSX, Path: forms[0], Paths: forms, UA: i.UA, Header: i.Header}
 	rules:
 		for k := range s.Rules { // the order IS the precedence (§A4): first match wins
 			rule := &s.Rules[k]
@@ -256,13 +214,13 @@ func (m *Matcher) Match(i MatchInput) MatchResult {
 			return ruleResult(rule, s.Version)
 		}
 	}
-	if reason := side(&s.Allow, &i, n4, has4, w, has6); reason != "" {
+	if reason := side(&s.Allow, &i, &forms, false, n4, has4, w, has6); reason != "" {
 		return MatchResult{Allowed: true, Reason: reason, Version: s.Version}
 	}
-	if reason := m.blockSide(&i, n4, has4, w, has6); reason != "" {
+	if reason := m.blockSide(&i, &forms, n4, has4, w, has6); reason != "" {
 		return MatchResult{Block: true, Reason: reason, Version: s.Version}
 	}
-	if reason := side(&s.Challenge, &i, n4, has4, w, has6); reason != "" {
+	if reason := side(&s.Challenge, &i, &forms, true, n4, has4, w, has6); reason != "" {
 		return MatchResult{Challenge: true, Reason: reason, Version: s.Version}
 	}
 	return MatchResult{Version: s.Version}
