@@ -8,7 +8,7 @@ camada.Handler(mux))` — that any router built on `http.Handler` sits behind. F
 design: a camada outage or bug never 5xxes your app.
 
 Not yet tagged — use it from a sibling checkout with a `replace` directive, as
-[`camada-go-example`](../camada-go-example) does; publishing is one decision with the npm
+[`camada-go-example`](https://github.com/camada-app/camada-go-example) does; publishing is one decision with the npm
 packages (SDK-G01). Go 1.23 or newer, no dependencies outside the standard library.
 
 ## Quickstart
@@ -21,7 +21,7 @@ mux.HandleFunc("GET /{$}", home)
 http.ListenAndServe(":8080", camada.Handler(mux))   // outermost, so camada answers before routing
 ```
 
-Env (printed by camada onboarding / `npm run seed` in dev):
+Env (the key is printed once when you create a project in the app):
 
 ```
 CAMADA_KEY=<ingest_token>.<snap_token>
@@ -86,7 +86,7 @@ http.ListenAndServe(":8080", cam.Handler(mux))
    event: method, host, path, scrubbed query, status, latency, route pattern (`r.Pattern`), header
    names/sizes, the auth scheme (never the credential), cookie count (never values). A panic in
    your handler ships as `st: 500` and propagates unchanged (net/http answers as it always does); a
-   hijacked connection ships as `st: 101`.
+   hijacked connection ships as `st: 101`. A 103 Early Hints is not the status: the final one is.
 
 ## Options
 
@@ -187,6 +187,6 @@ The suite reads the golden snapshot fixtures from the `camada-core` sibling chec
 first, then `go run ./scripts/sync-beacon` after a beacon release). Both fail by name when the
 checkout is missing rather than skipping.
 
-[`camada-go-example`](../camada-go-example) is the hand-test bench (net/http on :3003), and
+[`camada-go-example`](https://github.com/camada-app/camada-go-example) is the hand-test bench (net/http on :3003), and
 `node scripts/e2e-sdk-go.mjs` in `camada/edge-analyst` drives it against a seeded local analyst
 over real HTTP, cold first request included.
