@@ -221,6 +221,33 @@ func TestAHijackedConnectionReports101(t *testing.T) {
 	}
 }
 
+func TestEarlyHintsAreNotTheFinalStatus(t *testing.T) {
+	// 103 Early Hints, then the real answer: the event and the response both carry the final one
+	a := testutil.NewFakeAnalyst(t)
+	e := engineWith(t, a, nil, Options{})
+	loaded(t, e)
+	srv := httptest.NewServer(e.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Link", "</app.css>; rel=preload; as=style")
+		w.WriteHeader(http.StatusEarlyHints)
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "ok")
+	})))
+	defer srv.Close()
+	res, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	rid := res.Header.Get("x-rid")
+	if res.StatusCode != 200 || rid == "" {
+		t.Fatalf("%d %v", res.StatusCode, res.Header)
+	}
+	e.Queue.Flush()
+	if evs := a.AllEvents(); len(evs) != 1 || evs[0]["st"] != 200.0 || evs[0]["rid"] != rid {
+		t.Fatalf("%v", evs)
+	}
+}
+
 func TestA101CarriesNoRid(t *testing.T) {
 	// a websocket library that answers the handshake with WriteHeader(101) before it hijacks
 	a := testutil.NewFakeAnalyst(t)
