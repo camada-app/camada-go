@@ -11,8 +11,7 @@ package camada
 
 import "strings"
 
-// DefaultIngestURL is a PLACEHOLDER default, the same one @camada/node and camada-python carry —
-// confirm the production ingest domain before any release.
+// DefaultIngestURL is the production ingest; CAMADA_INGEST_URL overrides it.
 const DefaultIngestURL = "https://in.camada.app"
 
 // Env is the resolved configuration; credentials come from the environment only.
