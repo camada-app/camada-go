@@ -117,7 +117,8 @@ type RuleRequest struct {
 	ASN     int
 	Country string
 	TLSX    string
-	Path    string // already query-stripped
+	Path    string    // already query-stripped
+	Paths   [3]string // [raw, lit, full] (path.go); a path condition reads these, never Path
 	UA      string
 	Header  func(name string) (string, bool) // called with an already lower-cased name; nil where the tap cannot read headers
 }
@@ -189,7 +190,7 @@ func rangeSet(r4, r6 Bits, m *Side) RangeSet {
 			asn[n] = struct{}{}
 		}
 	}
-	exact, prefix, country := set(m.PathsExact), set(m.PathsPrefix), set(m.Country)
+	exact, prefix, country := canonSet(m.PathsExact), dirSet(m.PathsPrefix), set(m.Country)
 	empty := len(r4) == 0 && len(r6) == 0 && len(asn) == 0 && len(country) == 0 && len(exact) == 0 && len(prefix) == 0
 	return RangeSet{R4: r4, R6: r6, N6: len(r6) >> 3, ASN: asn, Country: country, PathsExact: exact, PathsPrefix: prefix, Empty: empty}
 }
@@ -321,8 +322,6 @@ func fieldValue(f string, r *RuleRequest) (string, bool) {
 		return r.Country, r.Country != ""
 	case "tlsx":
 		return r.TLSX, r.TLSX != ""
-	case "path":
-		return r.Path, true
 	case "ua":
 		return r.UA, r.UA != ""
 	}
@@ -370,8 +369,12 @@ func safeHeader(r *RuleRequest, name string) (v string, ok bool) {
 
 // compileCond turns one condition into a predicate. `sets` yields this rule's (v4, v6) section
 // pair per ip condition, in condition order, so an ip condition consumes the next one.
-func compileCond(c Cond, sets *[][2]Bits) RuleCond {
+func compileCond(c Cond, sets *[][2]Bits, deny bool) RuleCond {
 	f, op := c.F, c.Op
+	if f == "path" { // every path op reads the canonical forms (path.go)
+		pred := pathPred(op, stringValues(c.V))
+		return func(r *RuleRequest) bool { return pathHit(pred, &r.Paths, deny) }
+	}
 	negate := op == "is_not" || op == "not_in"
 	var read func(r *RuleRequest) (string, bool)
 	if f == "header" {
@@ -460,7 +463,7 @@ func compileRules(meta *Meta, v4s, v6s []Bits) []CompiledRule {
 		}
 		conds := make([]RuleCond, 0, len(r.Conds))
 		for _, c := range r.Conds {
-			conds = append(conds, compileCond(c, &sets))
+			conds = append(conds, compileCond(c, &sets, r.Action != "skip"))
 		}
 		out = append(out, CompiledRule{ID: r.ID, Action: r.Action, Conds: conds})
 	}
@@ -529,7 +532,7 @@ func ParseSnapshot(raw []byte, meta *Meta) (*Snapshot, error) {
 	}
 	var regexes []*regexp.Regexp
 	for _, p := range meta.PathsRegex {
-		if rx := CompileRegex(p); rx != nil {
+		if rx := compilePathRegex(p); rx != nil {
 			regexes = append(regexes, rx)
 		}
 	}
@@ -558,8 +561,8 @@ func ParseSnapshot(raw []byte, meta *Meta) (*Snapshot, error) {
 		ASNBm: asnBm, ASNExtra: sec[9],
 		Country:     set(meta.Country),
 		TLS:         set(meta.TLS),
-		PathsExact:  set(meta.PathsExact),
-		PathsPrefix: set(meta.PathsPrefix),
+		PathsExact:  canonSet(meta.PathsExact),
+		PathsPrefix: dirSet(meta.PathsPrefix),
 		PathsRegex:  regexes,
 		Allow:       rangeSet(sec[10], sec[11], meta.Allow),
 		Challenge:   rangeSet(sec[12], sec[13], meta.Challenge),

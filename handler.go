@@ -125,7 +125,7 @@ func reqFromHTTP(r *http.Request) *Req {
 	if host, _, err := net.SplitHostPort(peer); err == nil {
 		peer = host // "1.2.3.4:56" and "[::1]:56"; a unix socket stays as it is (no ip)
 	}
-	path := r.URL.Path
+	path := r.URL.EscapedPath() // still percent-encoded: the matcher canonicalises, and %2F must stay distinct from /
 	if path == "" {
 		path = "/"
 	}

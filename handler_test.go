@@ -38,6 +38,10 @@ func TestRequestMapping(t *testing.T) {
 	if _, ok := req.Header("x-none"); ok {
 		t.Fatal("absent header present")
 	}
+	// the matcher reads the path still percent-encoded: %2F must stay distinct from a separator
+	if p := reqFromHTTP(httptest.NewRequest("GET", "http://h/%62locked%2Fpath", nil)).Path; p != "/%62locked%2Fpath" {
+		t.Fatalf("raw path %q", p)
+	}
 	r2 := httptest.NewRequest("GET", "/", nil)
 	r2.RemoteAddr = "/var/run/app.sock"
 	if reqFromHTTP(r2).Peer != "/var/run/app.sock" { // a unix socket: the raw string, which is no ip
