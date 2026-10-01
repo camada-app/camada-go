@@ -347,7 +347,8 @@ func (c *Camada) decideRequest(req *Req, body []byte) (*Answer, *Passed) {
 			return
 		}
 		ev := c.event(req, rid, sid, newSession, ip)
-		ev["st"], ev["dur"] = status, time.Since(t0).Milliseconds()
+		// ts is the request start, the same clock read dur counts from
+		ev["ts"], ev["st"], ev["dur"] = t0.UnixMilli(), status, time.Since(t0).Milliseconds()
 		if req.Route != "" {
 			ev["rt"] = req.Route
 		}
