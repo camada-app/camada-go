@@ -224,7 +224,8 @@ func (s *statusRecorder) stamp() {
 }
 
 func (s *statusRecorder) WriteHeader(code int) {
-	if !s.wrote {
+	// an informational 1xx (103 Early Hints) is not the answer: the final status still follows
+	if !s.wrote && (code >= 200 || code == http.StatusSwitchingProtocols) {
 		s.wrote = true
 		s.status = code
 		s.stamp()
