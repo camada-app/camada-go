@@ -81,11 +81,12 @@ http.ListenAndServe(":8080", cam.Handler(mux))
 5. Serves the beacon: `GET /_cam/b.js` (the `@camada/browser` build, embedded) and `POST /_cam/fp`
    (≤ 32 KB, relayed onto the event batch as a `sig: 1` row with the ip camada resolved). Both
    fall through to your app when the tenant switched the beacon off.
-6. Runs your app with `X-Rid` and the `_sfp` session cookie on its response, and when the response
-   is done ships one redacted event: method, host, path, scrubbed query, status, latency, route
-   pattern (`r.Pattern`), header names/sizes, the auth scheme (never the credential), cookie count
-   (never values). A panic in your handler ships as `st: 500` and propagates unchanged (net/http
-   answers as it always does); a hijacked connection ships as `st: 101`.
+6. Runs your app with `X-Rid` (the rid of the request's event row; never on a 101 handshake) and
+   the `_sfp` session cookie on its response, and when the response is done ships one redacted
+   event: method, host, path, scrubbed query, status, latency, route pattern (`r.Pattern`), header
+   names/sizes, the auth scheme (never the credential), cookie count (never values). A panic in
+   your handler ships as `st: 500` and propagates unchanged (net/http answers as it always does); a
+   hijacked connection ships as `st: 101`.
 
 ## Options
 
