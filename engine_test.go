@@ -126,6 +126,26 @@ func TestAsksForV5ByDefaultAndOptsOutAt3(t *testing.T) {
 
 // ---- capture ----
 
+func TestTsIsTheRequestStartNotTheFinish(t *testing.T) {
+	a := testutil.NewFakeAnalyst(t)
+	h := newHost(t, a, hostOpts{handler: func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(200)
+	}})
+	start := time.Now().UnixMilli()
+	h.call(call{path: "/slow"})
+	end := time.Now().UnixMilli()
+	evs := h.events()
+	if len(evs) != 1 {
+		t.Fatalf("%v", evs)
+	}
+	ts, dur := int64(evs[0]["ts"].(float64)), int64(evs[0]["dur"].(float64))
+	// stamped as the request came in, not one dur later, so the bar [ts, ts+dur] ends with the response
+	if dur < 200 || ts < start || ts >= start+100 || ts+dur < end-100 || ts+dur > end+100 {
+		t.Fatalf("start %d end %d ts %d dur %d", start, end, ts, dur)
+	}
+}
+
 func TestCapturesOnFinishWithStatusLatencySessionAndRID(t *testing.T) {
 	a := testutil.NewFakeAnalyst(t)
 	h := newHost(t, a, hostOpts{handler: func(w http.ResponseWriter, r *http.Request) {
