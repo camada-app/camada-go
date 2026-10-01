@@ -228,6 +228,9 @@ func (s *statusRecorder) WriteHeader(code int) {
 		s.wrote = true
 		s.status = code
 		s.stamp()
+		if code == http.StatusSwitchingProtocols && s.Header().Get("X-Rid") == s.rid {
+			s.Header().Del("X-Rid") // never on a 101 (a websocket handshake): the rid stays with the event
+		}
 	}
 	s.ResponseWriter.WriteHeader(code)
 }
