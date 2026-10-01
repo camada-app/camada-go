@@ -221,6 +221,28 @@ func TestAHijackedConnectionReports101(t *testing.T) {
 	}
 }
 
+func TestA101CarriesNoRid(t *testing.T) {
+	// a websocket library that answers the handshake with WriteHeader(101) before it hijacks
+	a := testutil.NewFakeAnalyst(t)
+	e := engineWith(t, a, nil, Options{})
+	loaded(t, e)
+	app := e.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Upgrade", "websocket")
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/ws", nil)
+	r.RemoteAddr = defaultPeer + ":1"
+	app.ServeHTTP(rec, r)
+	if rec.Code != 101 || rec.Header().Get("x-rid") != "" || rec.Header().Get("Upgrade") != "websocket" {
+		t.Fatalf("%d %v", rec.Code, rec.Header())
+	}
+	e.Queue.Flush()
+	if evs := a.AllEvents(); len(evs) != 1 || evs[0]["st"] != 101.0 || evs[0]["rid"] == nil {
+		t.Fatalf("%v", evs)
+	}
+}
+
 func TestTheReadmeWarmUpWaitsForTheBootPoll(t *testing.T) {
 	// The README's startup recipe: Default() has already kicked the boot poll, so a plain Refresh()
 	// finds the lock held and returns cold; waiting on Verdict() until it is not cold is what warms it.
