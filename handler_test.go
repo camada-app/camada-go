@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
+	"net/textproto"
 	"strings"
 	"testing"
 	"time"
@@ -245,6 +247,37 @@ func TestEarlyHintsAreNotTheFinalStatus(t *testing.T) {
 	e.Queue.Flush()
 	if evs := a.AllEvents(); len(evs) != 1 || evs[0]["st"] != 200.0 || evs[0]["rid"] != rid {
 		t.Fatalf("%v", evs)
+	}
+}
+
+func TestInterimEarlyHintsCarryNoRidOrCookie(t *testing.T) {
+	a := testutil.NewFakeAnalyst(t)
+	e := engineWith(t, a, nil, Options{})
+	loaded(t, e)
+	srv := httptest.NewServer(e.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Link", "</app.css>; rel=preload; as=style")
+		w.WriteHeader(http.StatusEarlyHints)
+		w.Header().Set("X-App", "1")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "ok")
+	})))
+	defer srv.Close()
+	var hints http.Header
+	trace := &httptrace.ClientTrace{Got1xxResponse: func(code int, h textproto.MIMEHeader) error {
+		hints = http.Header(h)
+		return nil
+	}}
+	req, _ := http.NewRequest("GET", srv.URL+"/", nil)
+	res, err := http.DefaultClient.Do(req.WithContext(httptrace.WithClientTrace(req.Context(), trace)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if hints.Get("Link") == "" || hints.Get("X-Rid") != "" || hints.Get("Set-Cookie") != "" {
+		t.Fatalf("103: %v", hints)
+	}
+	if res.StatusCode != 200 || res.Header.Get("X-Rid") == "" || res.Header.Get("X-App") != "1" || res.Header.Get("Link") == "" {
+		t.Fatalf("final: %d %v", res.StatusCode, res.Header)
 	}
 }
 
