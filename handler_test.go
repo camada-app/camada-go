@@ -216,8 +216,15 @@ func TestAHijackedConnectionReports101(t *testing.T) {
 	if err == nil {
 		res.Body.Close()
 	}
-	e.Queue.Flush()
-	evs := a.AllEvents()
+	// the client sees EOF as soon as the conn closes, but the event is enqueued by the handler's
+	// deferred finish, which runs after that: wait for it rather than assume it already landed
+	var evs []map[string]any
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		e.Queue.Flush()
+		if evs = a.AllEvents(); len(evs) > 0 {
+			break
+		}
+	}
 	if len(evs) != 1 || evs[0]["p"] != "/ws" || evs[0]["st"] != 101.0 {
 		t.Fatalf("%v", evs)
 	}
