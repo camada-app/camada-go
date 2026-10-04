@@ -233,7 +233,34 @@ func (s *statusRecorder) WriteHeader(code int) {
 			s.Header().Del("X-Rid") // never on a 101 (a websocket handshake): the rid stays with the event
 		}
 	}
+	if code < 200 && code != http.StatusSwitchingProtocols && !s.wrote {
+		s.unstamp() // net/http writes the whole header map on a 1xx: keep camada's own off it
+		s.ResponseWriter.WriteHeader(code)
+		s.stamp() // the final response still carries them
+		return
+	}
 	s.ResponseWriter.WriteHeader(code)
+}
+
+// unstamp removes only what stamp added, leaving app headers (Link on a 103) alone.
+func (s *statusRecorder) unstamp() {
+	h := s.Header()
+	if s.rid != "" && h.Get("X-Rid") == s.rid {
+		h.Del("X-Rid")
+	}
+	if s.cookie != "" {
+		var keep []string
+		for _, c := range h.Values("Set-Cookie") {
+			if c != s.cookie {
+				keep = append(keep, c)
+			}
+		}
+		if len(keep) == 0 {
+			h.Del("Set-Cookie")
+		} else {
+			h["Set-Cookie"] = keep
+		}
+	}
 }
 
 func (s *statusRecorder) Write(b []byte) (int, error) {
