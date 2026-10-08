@@ -87,20 +87,22 @@ type Client struct {
 	SDK             string
 	SnapshotVersion int
 
-	matcher   atomic.Pointer[Matcher]
-	config    atomic.Pointer[config.RemoteConfig]
-	refresh   atomic.Int64 // nanoseconds
-	loadedAt  atomic.Int64 // now() at the last answered poll; 0 = cold
-	notBefore atomic.Int64 // now() before which a self-initiated poll waits after a failed one
-	base      time.Time    // monotonic origin of now()
-	now       func() time.Duration
-	pinned    bool
-	etag      string     // only touched under loading
-	loading   sync.Mutex // TryLock keeps one refresh in flight
-	mu        sync.Mutex // start/stop state
-	stop      chan struct{}
-	started   bool
-	stopped   bool
+	matcher       atomic.Pointer[Matcher]
+	config        atomic.Pointer[config.RemoteConfig]
+	refresh       atomic.Int64 // nanoseconds
+	loadedAt      atomic.Int64 // now() at the last answered poll; 0 = cold
+	notBefore     atomic.Int64 // now() before which a self-initiated poll waits after a failed one
+	base          time.Time    // monotonic origin of the default clock, set on first use
+	baseOnce      sync.Once
+	now           func() time.Duration // test seam; nil = the monotonic default clock
+	afterDueCheck func()               // test seam: runs between EnsureFresh's due check and taking the slot
+	pinned        bool
+	etag          string     // only touched under loading
+	loading       sync.Mutex // TryLock keeps one refresh in flight
+	mu            sync.Mutex // start/stop state
+	stop          chan struct{}
+	started       bool
+	stopped       bool
 }
 
 // New builds a client; nothing polls until Start (timer) or EnsureFresh (lazy).
@@ -126,10 +128,18 @@ func New(url, token string, o Options) *Client {
 	}
 	c.refresh.Store(int64(refresh))
 	c.stop = make(chan struct{})
-	// time.Since keeps the monotonic reading, so a wall-clock step cannot stall or storm the polls.
-	c.base = time.Now()
-	c.now = func() time.Duration { return time.Since(c.base) + 1 } // +1: never 0, which means cold
 	return c
+}
+
+// clock is the staleness clock. The default keeps time.Since's monotonic reading, so a wall-clock
+// step cannot stall or storm the polls; +1 keeps it off 0, which means cold. Its origin is set on
+// first use, so a Client built as a struct literal works too.
+func (c *Client) clock() time.Duration {
+	if c.now != nil {
+		return c.now()
+	}
+	c.baseOnce.Do(func() { c.base = time.Now() })
+	return time.Since(c.base) + 1
 }
 
 // Start kicks the first poll and, in timer mode, the poll goroutine.
@@ -186,15 +196,26 @@ func (c *Client) Matcher() *Matcher { return c.matcher.Load() }
 // full-interval comparison makes every other tick a no-op (effective cadence 2x).
 func (c *Client) Stale() bool {
 	loaded := c.loadedAt.Load()
-	return loaded == 0 || c.now()-time.Duration(loaded) > time.Duration(float64(c.refresh.Load())*0.9)
+	return loaded == 0 || c.clock()-time.Duration(loaded) > time.Duration(float64(c.refresh.Load())*0.9)
 }
 
-// Due is Stale and past the failure gate: what every self-initiated poll checks (no slack on the gate).
-func (c *Client) Due() bool { return c.Stale() && int64(c.now()) >= c.notBefore.Load() }
+// due is Stale and past the failure gate: what every self-initiated poll checks (no slack on the gate).
+func (c *Client) due() bool { return c.Stale() && int64(c.clock()) >= c.notBefore.Load() }
 
 // EnsureFresh kicks a refresh when due; never blocks the request path, never panics.
 func (c *Client) EnsureFresh() {
-	if !c.Due() || !c.loading.TryLock() {
+	if !c.due() {
+		return
+	}
+	if c.afterDueCheck != nil {
+		c.afterDueCheck()
+	}
+	if !c.loading.TryLock() {
+		return
+	}
+	// A poll that failed between the check above and the slot has just gated; do not start another.
+	if !c.due() {
+		c.loading.Unlock()
 		return
 	}
 	go c.loadLocked()
@@ -204,7 +225,7 @@ func (c *Client) EnsureFresh() {
 // unlocked, so a request that sees the slot free also sees the gate.
 func (c *Client) gate(status int, retryAfter string) {
 	d, _ := nextPollDelay(status, retryAfter, c.RefreshInterval().Seconds())
-	c.notBefore.Store(int64(c.now()) + int64(d*float64(time.Second)))
+	c.notBefore.Store(int64(c.clock()) + int64(d*float64(time.Second)))
 }
 
 // send is the transport call; a panicking transport is a poll that got no answer.
@@ -258,7 +279,7 @@ func (c *Client) load() error {
 	c.notBefore.Store(0)
 	// Stamped on the way out, corrupt body included (retry per poll cadence, not per request), and
 	// after the matcher swap: "not cold" must never be observable before the snapshot is in place.
-	defer func() { c.loadedAt.Store(int64(c.now())) }()
+	defer func() { c.loadedAt.Store(int64(c.clock())) }()
 	c.readConfig(res.Headers["x-camada-config"])
 	if res.Status == 304 {
 		return nil

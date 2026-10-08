@@ -6,6 +6,8 @@ package snapshot
 
 import (
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -98,8 +100,8 @@ func TestPollTimelines(t *testing.T) {
 			c.now = func() time.Duration { return now }
 			for _, s := range tl.Steps {
 				now = secs(tl.ClockBase + s.T)
-				if c.Due() != s.Poll {
-					t.Fatalf("t=%v: due=%v want %v", s.T, c.Due(), s.Poll)
+				if c.due() != s.Poll {
+					t.Fatalf("t=%v: due=%v want %v", s.T, c.due(), s.Poll)
 				}
 				if !s.Poll {
 					continue
@@ -130,11 +132,11 @@ func TestTransportPanicIsAFailedPollToo(t *testing.T) {
 	var now time.Duration = 1000 * time.Second
 	c.now = func() time.Duration { return now }
 	c.Refresh()
-	if c.Due() {
+	if c.due() {
 		t.Fatal("due right after a failed poll")
 	}
 	now += 5 * time.Second
-	if !c.Due() {
+	if !c.due() {
 		t.Fatal("not due after the 5 s floor")
 	}
 }
@@ -151,5 +153,112 @@ func TestStaleUsesTheMonotonicClock(t *testing.T) {
 	now += 28 * time.Second
 	if !c.Stale() {
 		t.Fatal("not stale after 0.9 x refresh")
+	}
+}
+
+// R1-S1: a request that read "due" while a poll was failing must not start a second poll
+// once it gets the slot.
+func TestEnsureFreshRechecksDueAfterTheSlot(t *testing.T) {
+	var polls atomic.Int32
+	c := New(url, "t", Options{Refresh: 30 * time.Second, Mode: "lazy", Transport: func(transport.Request) transport.Response {
+		polls.Add(1)
+		return transport.Response{Status: 503, Headers: map[string]string{}}
+	}})
+	var now time.Duration = 1000 * time.Second
+	c.now = func() time.Duration { return now }
+	hooked := false
+	c.afterDueCheck = func() {
+		if !hooked {
+			hooked = true
+			c.Refresh() // the competing poll fails and gates before this request gets the slot
+		}
+	}
+	c.EnsureFresh()
+	c.loading.Lock() // join a background load, if one was wrongly started
+	c.loading.Unlock()
+	if n := polls.Load(); n != 1 {
+		t.Fatalf("polls = %d, want 1", n)
+	}
+}
+
+// Request path under a closed gate: one poll per retry-after, not one per request.
+func TestEnsureFreshHonoursTheGate(t *testing.T) {
+	a := testutil.NewFakeAnalyst(t)
+	var polls atomic.Int32
+	failing := false
+	c := New(url, "t", Options{Refresh: 60 * time.Second, Mode: "lazy", Transport: func(r transport.Request) transport.Response {
+		polls.Add(1)
+		if !failing {
+			return a.Transport(r)
+		}
+		return transport.Response{Status: 503, Headers: map[string]string{"retry-after": "30"}}
+	}})
+	var now time.Duration = 1000 * time.Second
+	c.now = func() time.Duration { return now }
+	ensure := func() {
+		c.EnsureFresh()
+		c.loading.Lock()
+		c.loading.Unlock()
+	}
+	ensure() // warm: 200
+	if polls.Load() != 1 {
+		t.Fatalf("warm polls = %d", polls.Load())
+	}
+	failing = true
+	now += 55 * time.Second // stale (> 0.9 x 60)
+	for i := 0; i < 5; i++ {
+		ensure()
+	}
+	if n := polls.Load(); n != 2 {
+		t.Fatalf("polls under a closed gate = %d, want 2 (warm + one failure)", n)
+	}
+	now += 29 * time.Second
+	ensure()
+	if n := polls.Load(); n != 2 {
+		t.Fatalf("polled before retry-after: %d", n)
+	}
+	now += 1 * time.Second
+	ensure()
+	if n := polls.Load(); n != 3 {
+		t.Fatalf("polls after +30 s = %d, want 3", n)
+	}
+}
+
+// R1-N4: the default clock is monotonic-based (small offset from the client's birth, not a UnixNano).
+func TestDefaultClockIsMonotonicBased(t *testing.T) {
+	a := testutil.NewFakeAnalyst(t)
+	c := New(url, "t", Options{Refresh: 30 * time.Second, Mode: "lazy", Transport: a.Transport})
+	c.Refresh()
+	loaded := c.loadedAt.Load()
+	if loaded <= 0 || loaded >= int64(time.Hour) {
+		t.Fatalf("loadedAt = %d, want in (0, 1h)", loaded)
+	}
+}
+
+// R1-N5: a struct-literal client has no clock seam set and must not panic.
+func TestStructLiteralClientDoesNotPanic(t *testing.T) {
+	c := &Client{URL: url, Token: "t"}
+	if !c.Stale() || !c.due() {
+		t.Fatal("never-loaded literal client should be stale and due")
+	}
+	c.loadedAt.Store(int64(c.clock()))
+	c.refresh.Store(int64(30 * time.Second))
+	if c.Stale() {
+		t.Fatal("just-loaded literal client stale")
+	}
+}
+
+// A body the transport cannot read is no answer: no headers, so no retry-after is honoured.
+func TestUnreadableBodyHasNoHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "30")
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(503)
+		_, _ = w.Write([]byte("short")) // promises 100 bytes, sends 5: the read fails
+	}))
+	defer srv.Close()
+	res := transport.HTTP(transport.Request{Method: "GET", URL: srv.URL, Timeout: 2 * time.Second})
+	if res.Status != 0 || len(res.Headers) != 0 {
+		t.Fatalf("got status %d headers %v, want no answer and no headers", res.Status, res.Headers)
 	}
 }
