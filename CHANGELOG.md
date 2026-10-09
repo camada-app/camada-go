@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 (2026-10-09)
 
 - fix: a snapshot poll answered with anything but 200/204/304, or not answered, no longer retries back to back. The blocks are kept and the next self-initiated poll waits `max(Retry-After, 5 s)`, capped at the refresh interval.
 - fix: the snapshot staleness clock is monotonic, so a wall-clock step no longer stalls polling.
