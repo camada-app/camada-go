@@ -1,8 +1,8 @@
 package camada
 
-// C6 sdk-conformance: the language-neutral cases every server SDK runs (camada-core test/fixtures/ip/resolve.json and
-// redact/referer.json), so the XFF-port (0vho), peer-first cidrs (yfc6) and Referer-scrub (ijsa) semantics cannot
-// drift from core. A missing fixture fails by name; no case is skipped.
+// C6 sdk-conformance v3: the language-neutral cases every server SDK runs (camada-core test/fixtures/ip/resolve.json,
+// redact/referer.json and redact/query.json), so the XFF-port (0vho), peer-first cidrs (yfc6) and Referer/query-scrub
+// (ijsa) semantics cannot drift from core. A missing fixture fails by name; no case is skipped.
 
 import (
 	"encoding/json"
@@ -26,7 +26,7 @@ func TestConformanceResolveClientIP(t *testing.T) {
 		} `json:"cases"`
 	}
 	testutil.ReadJSON(t, "ip/resolve.json", &fx)
-	if fx.Version != 1 || len(fx.Cases) == 0 {
+	if fx.Version != 3 || len(fx.Cases) == 0 {
 		t.Fatalf("ip/resolve.json: version %d, %d cases", fx.Version, len(fx.Cases))
 	}
 	str := func(p *string) string { // null is "" in this SDK: no peer, no header, no address
@@ -59,7 +59,7 @@ func TestConformanceRefererRedaction(t *testing.T) {
 		} `json:"cases"`
 	}
 	testutil.ReadJSON(t, "redact/referer.json", &fx)
-	if fx.Version != 1 || len(fx.Cases) == 0 {
+	if fx.Version != 3 || len(fx.Cases) == 0 {
 		t.Fatalf("redact/referer.json: version %d, %d cases", fx.Version, len(fx.Cases))
 	}
 	for _, c := range fx.Cases {
@@ -77,18 +77,51 @@ func TestConformanceRefererRedaction(t *testing.T) {
 			if ev["ref"] != want {
 				t.Errorf("ref = %#v want %#v", ev["ref"], want)
 			}
-			var buf strings.Builder
-			enc := json.NewEncoder(&buf)
-			enc.SetEscapeHTML(false) // the secret must not hide behind \u0026
-			if err := enc.Encode(ev); err != nil {
-				t.Fatal(err)
-			}
-			wire := buf.String()
-			for _, secret := range c.Absent {
-				if strings.Contains(wire, secret) {
-					t.Errorf("%q shipped: %s", secret, wire)
-				}
-			}
+			assertAbsent(t, ev, c.Absent)
 		})
+	}
+}
+
+func TestConformanceQueryRedaction(t *testing.T) {
+	var fx struct {
+		Version int `json:"version"`
+		Cases   []struct {
+			ID     string   `json:"id"`
+			Query  string   `json:"query"`
+			Q      string   `json:"q"`
+			Absent []string `json:"absent"`
+		} `json:"cases"`
+	}
+	testutil.ReadJSON(t, "redact/query.json", &fx)
+	if fx.Version != 3 || len(fx.Cases) == 0 {
+		t.Fatalf("redact/query.json: version %d, %d cases", fx.Version, len(fx.Cases))
+	}
+	for _, c := range fx.Cases {
+		t.Run(c.ID, func(t *testing.T) {
+			headers := []events.Header{{Name: "User-Agent", Value: "ua"}}
+			info := events.RequestInfo{Method: "GET", Host: "x.test", Path: "/api/me", Query: c.Query, Headers: headers, IP: "1.2.3.4", HTTPVersion: "1.1"}
+			ev := events.BuildWireEvent(info, "sdk-go", "r", "", false, "")
+			if ev["q"] != c.Q {
+				t.Errorf("q = %#v want %#v", ev["q"], c.Q)
+			}
+			assertAbsent(t, ev, c.Absent)
+		})
+	}
+}
+
+// assertAbsent: no listed secret appears anywhere in the serialized event.
+func assertAbsent(t *testing.T, ev map[string]any, absent []string) {
+	t.Helper()
+	var buf strings.Builder
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false) // the secret must not hide behind \u0026
+	if err := enc.Encode(ev); err != nil {
+		t.Fatal(err)
+	}
+	wire := buf.String()
+	for _, secret := range absent {
+		if strings.Contains(wire, secret) {
+			t.Errorf("%q shipped: %s", secret, wire)
+		}
 	}
 }

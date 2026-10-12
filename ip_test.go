@@ -169,7 +169,36 @@ func TestNoPeerKeepsThePlainWalk(t *testing.T) {
 	if got := ResolveClientIP("", "172.64.1.1", cf); got != "" {
 		t.Errorf("all trusted: got %q", got)
 	}
-	if got := ResolveClientIP("@", "198.51.100.9, 172.64.1.1", cf); got != "198.51.100.9" { // a unix-socket peer: a local proxy
-		t.Errorf("unix socket peer: got %q", got)
+}
+
+// C6 v3: a non-empty peer that is not an ip after unmap could not be read: the result is "" (cidrs never walks for
+// it), while hops/vercel still take their XFF candidate.
+func TestUnreadablePeerNeverWalks(t *testing.T) {
+	cf := &TrustedProxy{Mode: "cidrs", CIDRs: cfPreset}
+	for _, peer := range []string{"@", "/run/app.sock", "1.2.3.4:5", "fe80::1%eth0", "::ffff:zz", "1.2.3.4 ", "64:ff9b::198.51.100.9"} {
+		if got := ResolveClientIP(peer, "198.51.100.9, 172.64.1.1", cf); got != "" {
+			t.Errorf("cidrs %q: got %q", peer, got)
+		}
+		if got := ResolveClientIP(peer, "", nil); got != "" {
+			t.Errorf("no config %q: got %q", peer, got)
+		}
+		if got := ResolveClientIP(peer, "198.51.100.9", &TrustedProxy{Mode: "hops", Hops: 1}); got != "198.51.100.9" {
+			t.Errorf("hops %q: got %q", peer, got)
+		}
+	}
+}
+
+func TestV6GrammarAndOWSAreOurs(t *testing.T) {
+	hops1 := &TrustedProxy{Mode: "hops", Hops: 1}
+	for _, bad := range []string{":8:8:8", "2001:db8::1:", "::1.2.3.4", "::ffff:1.2.3.256", "0:0:0:0:0:ffff:1.2.3.4", ":::", "\u00a0203.0.113.5", "203.0.113.5\r"} {
+		if got := ResolveClientIP("10.0.0.1", bad, hops1); got != "10.0.0.1" {
+			t.Errorf("%q: got %q", bad, got)
+		}
+	}
+	if got := ResolveClientIP("10.0.0.1", "\t::FFFF:203.0.113.5 ", hops1); got != "203.0.113.5" {
+		t.Errorf("unmap/OWS: got %q", got)
+	}
+	if got := ResolveClientIP("::ffff:7f00:1", "198.51.100.9", &TrustedProxy{Mode: "cidrs", CIDRs: cfPreset}); got != "::ffff:7f00:1" {
+		t.Errorf("::ffff:7f00:1 is not loopback: got %q", got)
 	}
 }

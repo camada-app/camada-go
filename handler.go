@@ -121,23 +121,21 @@ func reqFromHTTP(r *http.Request) *Req {
 	if r.URL.RawQuery != "" {
 		query = "?" + r.URL.RawQuery
 	}
-	peer := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(peer); err == nil {
-		peer = host // "1.2.3.4:56" and "[::1]:56"; a unix socket stays as it is (no ip)
-	}
+	peer, unreadable := peerFromHTTP(r)
 	path := r.URL.EscapedPath() // still percent-encoded: the matcher canonicalises, and %2F must stay distinct from /
 	if path == "" {
 		path = "/"
 	}
 	return &Req{
-		Method:      r.Method,
-		Path:        path,
-		Query:       query,
-		Host:        r.Host,
-		HTTPVersion: strconv.Itoa(r.ProtoMajor) + "." + strconv.Itoa(r.ProtoMinor),
-		Peer:        peer,
-		HTTPS:       r.TLS != nil,
-		Headers:     headers,
+		Method:         r.Method,
+		Path:           path,
+		Query:          query,
+		Host:           r.Host,
+		HTTPVersion:    strconv.Itoa(r.ProtoMajor) + "." + strconv.Itoa(r.ProtoMinor),
+		Peer:           peer,
+		PeerUnreadable: unreadable,
+		HTTPS:          r.TLS != nil,
+		Headers:        headers,
 	}
 }
 
@@ -302,3 +300,21 @@ func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 // Unwrap lets http.ResponseController reach the underlying writer.
 func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
+
+// peerFromHTTP is what the net/http adapter passes as the peer (C6 v3): on a unix-socket listener (the server's
+// local address, http.LocalAddrContextKey, is a unix one) there is no peer, so a cidrs config walks XFF alone and
+// trusts the host's network edge. Otherwise the host from net.SplitHostPort(r.RemoteAddr); a RemoteAddr it cannot
+// split (no port, "", "@", or rewritten to a bare ip by a middleware) is a peer that could not be read, and the
+// request then resolves to no ip at all, never to the XFF walk.
+func peerFromHTTP(r *http.Request) (peer string, unreadable bool) {
+	if la, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr); ok && la != nil {
+		if n := la.Network(); n == "unix" || n == "unixpacket" {
+			return "", false
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil || host == "" {
+		return "", true
+	}
+	return host, false // "1.2.3.4:56" and "[::1]:56"
+}
