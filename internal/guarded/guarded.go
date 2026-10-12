@@ -10,9 +10,10 @@ import (
 )
 
 var (
-	mu     sync.Mutex
-	last   time.Time
-	logger = log.Default()
+	mu       sync.Mutex
+	last     time.Time
+	lastWarn time.Time
+	logger   = log.Default()
 )
 
 // SetLogger routes the rate-limited line somewhere other than the standard logger.
@@ -37,9 +38,25 @@ func LogRateLimited(err any) {
 	l.Printf("[camada] suppressed error (SDK fails open): %v", err)
 }
 
+// WarnRateLimited reports a misconfiguration the SDK detected, at most once a minute, on its own budget so it neither
+// hides nor is hidden by a suppressed error.
+func WarnRateLimited(msg string) {
+	defer func() { _ = recover() }()
+	mu.Lock()
+	now := time.Now()
+	if now.Sub(lastWarn) < time.Minute {
+		mu.Unlock()
+		return
+	}
+	lastWarn = now
+	l := logger
+	mu.Unlock()
+	l.Printf("[camada] warning: %s", msg)
+}
+
 // Reset forgets the last report so the next one is written (tests).
 func Reset() {
 	mu.Lock()
 	defer mu.Unlock()
-	last = time.Time{}
+	last, lastWarn = time.Time{}, time.Time{}
 }

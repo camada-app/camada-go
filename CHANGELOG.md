@@ -9,6 +9,8 @@
 - fix (security): the resolved ip is always a valid address or none (C6 v3). A `RemoteAddr` that `net.SplitHostPort` cannot split, or `@`, on a TCP listener gives no ip and never the `X-Forwarded-For` walk; only a unix-socket listener walks `X-Forwarded-For` alone. `X-Forwarded-For` entries are trimmed of SP/HTAB only, `::ffff:a.b.c.d` entries are unmapped, IPv6 with a single leading/trailing `:` or an embedded dotted quad is invalid, and a non-ip entry is never a trusted hop.
 - fix (security): the query scrub (`q`, and `ref`'s query and fragment) percent-decodes names and values (bytewise, up to 4 passes, no `+`) before testing, tests bare parts, and replaces a value whose nested query carries a credential segment; attack payloads such as `q=1' or '1'='1` stay visible. Name matching is ASCII-only.
 - fix: the challenge page CSP no longer carries `form-action 'self'`, which blocked a post-solve redirect to another origin.
+- fix: a request with no `http.LocalAddrContextKey` (Lambda / API Gateway adapters, `http.NewRequest`) has no socket: a `RemoteAddr` of `""` is no peer and walks `X-Forwarded-For` as before, and a bare ip is the peer. Only a TCP listener's unsplittable `RemoteAddr` is an unreadable peer.
+- docs: mount `camada.Handler` outside chi's `middleware.RealIP` and gorilla's `handlers.ProxyHeaders`. Both rewrite `RemoteAddr` to a bare ip, which on a TCP listener leaves camada with no ip (blocks and challenges fail open); camada now logs a rate-limited warning when it sees one.
 - chore: beacon re-vendored (`@camada/browser` 0.3.1 packaging fix, same behaviour).
 - test: the shared C6 v3 conformance cases (`ip/resolve.json`, `redact/referer.json`, `redact/query.json`) run in `sdk_conformance_test.go`.
 
