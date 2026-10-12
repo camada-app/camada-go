@@ -46,10 +46,12 @@ type Req struct {
 	Query       string // with the leading '?', or ""
 	Host        string
 	HTTPVersion string // "1.1", "2.0"; "" when unknown
-	Peer        string // the socket peer the host vouches for; "" when there is none
-	HTTPS       bool
-	Headers     []Header
-	Route       string // the matched route pattern, when the host knows it at finish time
+	Peer        string // the socket peer the host vouches for; "" when there is none (no socket, a unix-socket listener)
+	// PeerUnreadable: the host has a socket but could not read its peer for this request; the ip is then "" (C6 v3).
+	PeerUnreadable bool
+	HTTPS          bool
+	Headers        []Header
+	Route          string // the matched route pattern, when the host knows it at finish time
 }
 
 // Header joins a header the client repeated the way node:http does it: cookies with "; "
@@ -219,8 +221,13 @@ func (c *Camada) beaconEnabled() bool {
 	return c.Snap != nil && c.Snap.Config().BeaconOn()
 }
 
-func (c *Camada) ip(req *Req) string {
-	return ResolveClientIP(req.Peer, req.header("x-forwarded-for"), c.trustedProxy())
+func (c *Camada) ip(req *Req) string { return reqIP(req, c.trustedProxy()) }
+
+func reqIP(req *Req, cfg *TrustedProxy) string {
+	if req.PeerUnreadable {
+		return "" // never pass "" (no peer) together with XFF for a socket whose peer is unknown
+	}
+	return ResolveClientIP(req.Peer, req.header("x-forwarded-for"), cfg)
 }
 
 // ---- the adapter contract ----

@@ -70,10 +70,16 @@ http.ListenAndServe(":8080", cam.Handler(mux))
    header on its own is never the ip: any caller can set it. Nothing needs disabling for proxies —
    `net/http` never rewrites the peer — so a reverse proxy in front of the app is declared, not
    inferred. Entries may carry a port (`ip:port`, `[v6]:port`, as Azure Application Gateway writes
-   them). Under `cidrs` (and the dashboard's Cloudflare option, stored as `cidrs`) the socket peer
-   must itself be one of the trusted ranges or a loopback address (a local front end or sidecar);
-   otherwise the peer is the client and `X-Forwarded-For` is ignored, so a direct hit on your origin
-   cannot pick its own ip. A peer that is not an ip (a unix socket) keeps the plain walk.
+   them) or the `::ffff:a.b.c.d` form, and are trimmed of spaces and tabs only. The resolved ip is
+   always a valid address or none. Under `cidrs` (and the dashboard's Cloudflare option, stored as
+   `cidrs`) the socket peer must itself be one of the trusted ranges or a loopback address (a local
+   front end or sidecar); otherwise the peer is the client and `X-Forwarded-For` is ignored, so a
+   direct hit on your origin cannot pick its own ip. The peer is the host of
+   `net.SplitHostPort(r.RemoteAddr)`; a `RemoteAddr` it cannot split (`@`, `""`, or a bare ip that a
+   middleware such as chi's `RealIP` wrote there) could not be read, and the request then has no ip
+   at all. Only a server listening on a unix socket (detected from `http.LocalAddrContextKey`) means
+   no peer: the walk then runs over `X-Forwarded-For` alone and trusts your network edge, so the app
+   must not be reachable around it.
 3. Enforces before anything else, beacon endpoints included: your ordered custom rules first (first
    match wins; they read ip, path, user-agent and request headers), then allow → block → challenge.
    A block answers `403 Forbidden` with `x-block-reason`, `x-block-version` and, when a rule
@@ -82,9 +88,9 @@ http.ListenAndServe(":8080", cam.Handler(mux))
 4. Challenge: a `challenge` verdict gets the self-contained proof-of-work page (or 403 JSON for a
    non-HTML request); `POST /__camada/challenge` verifies the solution, sets `_cch` (bound to the
    ip, one hour) and 302s back. A request whose ip cannot be resolved is never challenged. The page
-   carries its own `Content-Security-Policy` (its inline solver and style by hash, `form-action
-   'self'`) and replaces any policy a middleware already put on the response, so a strict site CSP
-   cannot block it.
+   carries its own `Content-Security-Policy` (its inline solver and style by hash, nothing else)
+   and replaces any policy a middleware already put on the response, so a strict site CSP cannot
+   block it.
 5. Serves the beacon: `GET /_cam/b.js` (the `@camada/browser` build, embedded) and `POST /_cam/fp`
    (≤ 32 KB, relayed onto the event batch as a `sig: 1` row with the ip camada resolved). Both
    fall through to your app when the tenant switched the beacon off.

@@ -79,7 +79,7 @@ func TestHordAndQueryAreCapped(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		headers = append(headers, Header{"x-" + strconv.Itoa(i), "v"})
 	}
-	ev := BuildWireEvent(req(headers, "?"+strings.Repeat("a", 600), "1.2.3.4"), "sdk-go", "r", "", false, "")
+	ev := BuildWireEvent(req(headers, "?"+strings.Repeat("a=1&", 150), "1.2.3.4"), "sdk-go", "r", "", false, "")
 	if len(ev["hord"].(string)) != 2048 || len(ev["q"].(string)) != 512 {
 		t.Fatalf("hord %d q %d", len(ev["hord"].(string)), len(ev["q"].(string)))
 	}

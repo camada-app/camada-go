@@ -4,7 +4,9 @@ package camada
 // back, the recorder's status and stamps, the route pattern, and the lazy default engine.
 
 import (
+	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httptrace"
@@ -44,10 +46,44 @@ func TestRequestMapping(t *testing.T) {
 	if p := reqFromHTTP(httptest.NewRequest("GET", "http://h/%62locked%2Fpath", nil)).Path; p != "/%62locked%2Fpath" {
 		t.Fatalf("raw path %q", p)
 	}
-	r2 := httptest.NewRequest("GET", "/", nil)
-	r2.RemoteAddr = "/var/run/app.sock"
-	if reqFromHTTP(r2).Peer != "/var/run/app.sock" { // a unix socket: the raw string, which is no ip
-		t.Fatal("unix peer")
+}
+
+// C6 v3 peer table, net/http: a unix-socket listener is no peer (the cidrs walk runs over XFF alone); a RemoteAddr
+// SplitHostPort cannot split, or "@", on a TCP listener could not be read and resolves to no ip.
+func TestPeerRuleUnixListenerAndUnreadablePeer(t *testing.T) {
+	cfg := &TrustedProxy{Mode: "cidrs", CIDRs: []string{"172.64.0.0/13"}}
+	resolve := func(r *http.Request) string { return reqIP(reqFromHTTP(r), cfg) }
+	mk := func(remote string, local net.Addr) *http.Request {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = remote
+		r.Header.Set("X-Forwarded-For", "198.51.100.9, 172.64.1.1")
+		if local != nil {
+			r = r.WithContext(context.WithValue(r.Context(), http.LocalAddrContextKey, local))
+		}
+		return r
+	}
+	unix := &net.UnixAddr{Name: "/run/app.sock", Net: "unix"}
+	tcp := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 8080}
+	for _, remote := range []string{"@", "", "/run/app.sock"} {
+		if got := resolve(mk(remote, unix)); got != "198.51.100.9" {
+			t.Errorf("unix listener, RemoteAddr %q: got %q", remote, got)
+		}
+		if req := reqFromHTTP(mk(remote, unix)); req.Peer != "" || req.PeerUnreadable {
+			t.Errorf("unix listener, RemoteAddr %q: %+v", remote, req)
+		}
+	}
+	for _, remote := range []string{"@", "", "/run/app.sock", "198.51.100.7", "[fe80::1%eth0]:1"} {
+		for _, local := range []net.Addr{tcp, nil} {
+			if got := resolve(mk(remote, local)); got != "" {
+				t.Errorf("tcp listener %v, RemoteAddr %q: got %q", local, remote, got)
+			}
+		}
+	}
+	if got := resolve(mk("172.64.1.1:443", tcp)); got != "198.51.100.9" { // a trusted peer still walks
+		t.Errorf("trusted peer: got %q", got)
+	}
+	if got := resolve(mk("203.0.113.5:443", tcp)); got != "203.0.113.5" { // a direct hit is the client
+		t.Errorf("direct hit: got %q", got)
 	}
 }
 

@@ -6,7 +6,11 @@
 - fix: `X-Forwarded-For` entries with a port (`203.0.113.66:51234`, `[2001:db8::66]:51234`, as Azure Application Gateway writes them) resolve to the address in every mode instead of falling back to the proxy's ip. (camada-all-0vho)
 - fix: `ref` no longer ships the Referer verbatim: its query and fragment go through the query scrub (`~r`). New `ScrubURL`. (camada-all-ijsa)
 - fix: the challenge page sends its own `Content-Security-Policy` (its inline solver and style by hash) and replaces a policy already on the response, so a strict app CSP no longer blocks the solver; the solver reads the nonce from the form. New `challenge.PageCSP`. (camada-all-y38o)
-- test: the shared C6 conformance cases (`ip/resolve.json`, `redact/referer.json`) run in `sdk_conformance_test.go`.
+- fix (security): the resolved ip is always a valid address or none (C6 v3). A `RemoteAddr` that `net.SplitHostPort` cannot split, or `@`, on a TCP listener gives no ip and never the `X-Forwarded-For` walk; only a unix-socket listener walks `X-Forwarded-For` alone. `X-Forwarded-For` entries are trimmed of SP/HTAB only, `::ffff:a.b.c.d` entries are unmapped, IPv6 with a single leading/trailing `:` or an embedded dotted quad is invalid, and a non-ip entry is never a trusted hop.
+- fix (security): the query scrub (`q`, and `ref`'s query and fragment) percent-decodes names and values (bytewise, up to 4 passes, no `+`) before testing, tests bare parts, and replaces a value whose nested query carries a credential segment; attack payloads such as `q=1' or '1'='1` stay visible. Name matching is ASCII-only.
+- fix: the challenge page CSP no longer carries `form-action 'self'`, which blocked a post-solve redirect to another origin.
+- chore: beacon re-vendored (`@camada/browser` 0.3.1 packaging fix, same behaviour).
+- test: the shared C6 v3 conformance cases (`ip/resolve.json`, `redact/referer.json`, `redact/query.json`) run in `sdk_conformance_test.go`.
 
 ## 0.1.3 (2026-10-09)
 

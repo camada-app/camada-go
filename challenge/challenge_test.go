@@ -234,12 +234,12 @@ func TestPageCSPAllowsExactlyTheServedInlineScriptAndStyle(t *testing.T) {
 		page := challenge.Page("abc123", "/__camada/challenge", "/x", bits)
 		csp := challenge.PageCSP(bits)
 		for _, want := range []string{"script-src " + shaSrc(inline(t, page, "script")) + ";", "style-src " + shaSrc(inline(t, page, "style")) + ";",
-			"default-src 'none'", "form-action 'self'"} {
+			"default-src 'none'"} {
 			if !strings.Contains(csp, want) {
 				t.Errorf("bits %d: %q lacks %q", bits, csp, want)
 			}
 		}
-		if strings.Contains(csp, "unsafe") {
+		if strings.Contains(csp, "unsafe") || strings.Contains(csp, "form-action") {
 			t.Errorf("bits %d: %q", bits, csp)
 		}
 	}
@@ -259,7 +259,7 @@ func TestPageCSPIsFixedPerBitsAndTheNonceStaysInTheForm(t *testing.T) {
 	}
 	// @camada/core challengePageCsp(16) (src/challenge/page.ts): the page is byte-for-byte core's, so the hashes match
 	core := "default-src 'none'; script-src 'sha256-ciEqEwbzJaoB3rni2OdS8TuYa+/yFdFMAkRscUn8z8k='; " +
-		"style-src 'sha256-uTQFkKw4mZsBeb9oMeUmhuhVK7WwsKvYVU1JAzADMu0='; form-action 'self'; base-uri 'none'; frame-ancestors 'self'"
+		"style-src 'sha256-uTQFkKw4mZsBeb9oMeUmhuhVK7WwsKvYVU1JAzADMu0='; base-uri 'none'; frame-ancestors 'self'"
 	if got := challenge.PageCSP(challenge.PowBits); got != core {
 		t.Fatalf("PageCSP(16) = %q\nwant core's %q", got, core)
 	}
