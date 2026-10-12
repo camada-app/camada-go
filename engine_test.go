@@ -564,6 +564,9 @@ func TestWrongSolutionOrForgedNonceReservesThePage(t *testing.T) {
 	if r.status != 403 || r.header("set-cookie") != "" || !strings.Contains(r.body, "camada-f") {
 		t.Fatalf("%+v", r)
 	}
+	if csp := r.headers.Values("Content-Security-Policy"); len(csp) != 1 || csp[0] != challenge.PageCSP(challenge.PowBits) { // the re-served page carries its own policy
+		t.Fatalf("csp %v", csp)
+	}
 	forged := strings.Repeat("f", 32)
 	r = h.call(call{method: "POST", path: "/__camada/challenge", body: "nonce=" + forged + "&solution=" + testutil.Solve(forged) + "&to=%2F", peer: testutil.ChallengedIP})
 	if r.status != 403 || r.header("set-cookie") != "" {

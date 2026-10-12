@@ -6,6 +6,7 @@ package camada
 import (
 	"context"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/camada-app/camada-go/internal/guarded"
 	"github.com/camada-app/camada-go/internal/testutil"
 	"github.com/camada-app/camada-go/snapshot"
 )
@@ -49,10 +51,13 @@ func TestRequestMapping(t *testing.T) {
 }
 
 // C6 v3 peer table, net/http: a unix-socket listener is no peer (the cidrs walk runs over XFF alone); a RemoteAddr
-// SplitHostPort cannot split, or "@", on a TCP listener could not be read and resolves to no ip.
+// SplitHostPort cannot split, or "@", on a TCP listener could not be read and resolves to no ip. A request with no
+// local address at all (a Lambda/API Gateway shim, http.NewRequest) has no socket: "" is no peer and walks, and any
+// other unsplittable RemoteAddr is passed as-is (a bare ip is the peer; anything else fails validation).
 func TestPeerRuleUnixListenerAndUnreadablePeer(t *testing.T) {
 	cfg := &TrustedProxy{Mode: "cidrs", CIDRs: []string{"172.64.0.0/13"}}
-	resolve := func(r *http.Request) string { return reqIP(reqFromHTTP(r), cfg) }
+	resolveWith := func(r *http.Request, c *TrustedProxy) string { return reqIP(reqFromHTTP(r), c) }
+	resolve := func(r *http.Request) string { return resolveWith(r, cfg) }
 	mk := func(remote string, local net.Addr) *http.Request {
 		r := httptest.NewRequest("GET", "/", nil)
 		r.RemoteAddr = remote
@@ -73,10 +78,32 @@ func TestPeerRuleUnixListenerAndUnreadablePeer(t *testing.T) {
 		}
 	}
 	for _, remote := range []string{"@", "", "/run/app.sock", "198.51.100.7", "[fe80::1%eth0]:1"} {
-		for _, local := range []net.Addr{tcp, nil} {
-			if got := resolve(mk(remote, local)); got != "" {
-				t.Errorf("tcp listener %v, RemoteAddr %q: got %q", local, remote, got)
-			}
+		if got := resolve(mk(remote, tcp)); got != "" {
+			t.Errorf("tcp listener, RemoteAddr %q: got %q", remote, got)
+		}
+	}
+	// no local address: no socket concept
+	for remote, want := range map[string]string{
+		"":                 "198.51.100.9", // no peer: walks XFF
+		"198.51.100.7":     "198.51.100.7", // a bare ip from the platform is the peer (not trusted: the client)
+		"172.64.1.1":       "198.51.100.9", // a bare trusted ip walks
+		"@":                "",             // garbage fails validation
+		"/run/app.sock":    "",
+		"[fe80::1%eth0]:1": "",
+	} {
+		if got := resolve(mk(remote, nil)); got != want {
+			t.Errorf("no local address, RemoteAddr %q: got %q want %q", remote, got, want)
+		}
+		if req := reqFromHTTP(mk(remote, nil)); req.PeerUnreadable {
+			t.Errorf("no local address, RemoteAddr %q: unreadable", remote)
+		}
+	}
+	for _, c := range []*TrustedProxy{{Mode: "vercel"}, {Mode: "hops", Hops: 1}} {
+		if got := resolveWith(mk("", nil), c); got != "172.64.1.1" {
+			t.Errorf("no local address, RemoteAddr \"\", %s: got %q", c.Mode, got)
+		}
+		if got := resolveWith(mk("", tcp), c); got != "" {
+			t.Errorf("tcp listener, RemoteAddr \"\", %s: got %q", c.Mode, got)
 		}
 	}
 	if got := resolve(mk("172.64.1.1:443", tcp)); got != "198.51.100.9" { // a trusted peer still walks
@@ -84,6 +111,28 @@ func TestPeerRuleUnixListenerAndUnreadablePeer(t *testing.T) {
 	}
 	if got := resolve(mk("203.0.113.5:443", tcp)); got != "203.0.113.5" { // a direct hit is the client
 		t.Errorf("direct hit: got %q", got)
+	}
+}
+
+// A middleware (chi's RealIP, gorilla's ProxyHeaders) that rewrote RemoteAddr to a bare ip on a TCP listener: no ip,
+// and one warning line naming the cause, rate-limited.
+func TestBareIPRemoteAddrOnATCPListenerWarnsOnce(t *testing.T) {
+	var buf strings.Builder
+	SetLogger(log.New(&buf, "", 0))
+	t.Cleanup(func() { SetLogger(log.Default()) })
+	guarded.Reset()
+	tcp := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 8080}
+	for i := 0; i < 3; i++ {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = "198.51.100.7"
+		r = r.WithContext(context.WithValue(r.Context(), http.LocalAddrContextKey, net.Addr(tcp)))
+		if got := reqIP(reqFromHTTP(r), nil); got != "" {
+			t.Fatalf("ip %q", got)
+		}
+	}
+	out := buf.String()
+	if strings.Count(out, "\n") != 1 || !strings.Contains(out, "RemoteAddr") || !strings.Contains(out, "198.51.100.7") {
+		t.Fatalf("log %q", out)
 	}
 }
 

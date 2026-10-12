@@ -118,7 +118,8 @@ var attrEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"
 func EscapeAttr(s string) string { return attrEscaper.Replace(s) }
 
 // EscapeScript is a JSON string literal safe to drop inside an inline <script>: `<` is escaped
-// so no value can close the element early.
+// so no value can close the element early. The page no longer inlines a value (the solver reads the nonce from the
+// form), so nothing here calls it; it stays exported for API parity with core's escapeScript.
 func EscapeScript(s string) string {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

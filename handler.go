@@ -11,9 +11,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
@@ -301,20 +303,32 @@ func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 // Unwrap lets http.ResponseController reach the underlying writer.
 func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
-// peerFromHTTP is what the net/http adapter passes as the peer (C6 v3): on a unix-socket listener (the server's
-// local address, http.LocalAddrContextKey, is a unix one) there is no peer, so a cidrs config walks XFF alone and
-// trusts the host's network edge. Otherwise the host from net.SplitHostPort(r.RemoteAddr); a RemoteAddr it cannot
-// split (no port, "", "@", or rewritten to a bare ip by a middleware) is a peer that could not be read, and the
-// request then resolves to no ip at all, never to the XFF walk.
+// peerFromHTTP is what the net/http adapter passes as the peer (C6 v3). The server's local address
+// (http.LocalAddrContextKey) says what kind of socket the request came in on:
+//   - a unix one: there is no peer, so a cidrs config walks XFF alone and trusts the host's network edge;
+//   - a TCP one: the host from net.SplitHostPort(r.RemoteAddr); a RemoteAddr it cannot split (no port, "", "@", or
+//     rewritten to a bare ip by a middleware such as chi's middleware.RealIP or gorilla's handlers.ProxyHeaders) is a
+//     peer that could not be read, and the request then resolves to no ip at all, never to the XFF walk;
+//   - none (a Lambda/API Gateway shim, a request built with http.NewRequest): no socket concept. The SplitHostPort host
+//     when it splits; "" is no peer (walks XFF); anything else is passed as-is (a bare ip from the platform is the
+//     peer, and a non-ip fails validation).
 func peerFromHTTP(r *http.Request) (peer string, unreadable bool) {
-	if la, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr); ok && la != nil {
+	la, _ := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
+	if la != nil {
 		if n := la.Network(); n == "unix" || n == "unixpacket" {
 			return "", false
 		}
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil || host == "" {
-		return "", true
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && host != "" {
+		return host, false // "1.2.3.4:56" and "[::1]:56"
 	}
-	return host, false // "1.2.3.4:56" and "[::1]:56"
+	if la == nil {
+		return r.RemoteAddr, false
+	}
+	if _, err := netip.ParseAddr(r.RemoteAddr); err == nil {
+		guarded.WarnRateLimited(fmt.Sprintf("r.RemoteAddr %q is a bare ip on a TCP listener: a middleware rewrote it "+
+			"(chi middleware.RealIP, gorilla handlers.ProxyHeaders?), so camada resolves no ip and blocks and challenges "+
+			"fail open; mount camada's Handler outside that middleware", r.RemoteAddr))
+	}
+	return "", true
 }

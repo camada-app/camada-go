@@ -68,18 +68,29 @@ http.ListenAndServe(":8080", cam.Handler(mux))
 2. Resolves the client from the socket peer (`r.RemoteAddr`), combined with `X-Forwarded-For`
    only under your tenant's trusted-proxy config (or `CAMADA_TRUSTED_PROXY` locally). A forwarded
    header on its own is never the ip: any caller can set it. Nothing needs disabling for proxies —
-   `net/http` never rewrites the peer — so a reverse proxy in front of the app is declared, not
+   `net/http` itself never rewrites the peer — so a reverse proxy in front of the app is declared, not
    inferred. Entries may carry a port (`ip:port`, `[v6]:port`, as Azure Application Gateway writes
    them) or the `::ffff:a.b.c.d` form, and are trimmed of spaces and tabs only. The resolved ip is
    always a valid address or none. Under `cidrs` (and the dashboard's Cloudflare option, stored as
    `cidrs`) the socket peer must itself be one of the trusted ranges or a loopback address (a local
    front end or sidecar); otherwise the peer is the client and `X-Forwarded-For` is ignored, so a
    direct hit on your origin cannot pick its own ip. The peer is the host of
-   `net.SplitHostPort(r.RemoteAddr)`; a `RemoteAddr` it cannot split (`@`, `""`, or a bare ip that a
-   middleware such as chi's `RealIP` wrote there) could not be read, and the request then has no ip
-   at all. Only a server listening on a unix socket (detected from `http.LocalAddrContextKey`) means
-   no peer: the walk then runs over `X-Forwarded-For` alone and trusts your network edge, so the app
-   must not be reachable around it.
+   `net.SplitHostPort(r.RemoteAddr)`. What a `RemoteAddr` it cannot split means depends on the
+   listener, read from `http.LocalAddrContextKey`:
+   - **TCP listener**: the peer could not be read (`@`, `""`, or a bare ip), and the request has no
+     ip at all, never the `X-Forwarded-For` walk.
+   - **unix-socket listener**: no peer. The walk runs over `X-Forwarded-For` alone and trusts your
+     network edge, so the app must not be reachable around it.
+   - **no local address** (a Lambda / API Gateway adapter, a request built with `http.NewRequest`):
+     no socket. `""` is no peer and walks `X-Forwarded-For`; a bare ip the platform put there is the
+     peer; anything else is not an ip and resolves to none.
+
+   **Mount `camada.Handler` outside chi's `middleware.RealIP` and gorilla's
+   `handlers.ProxyHeaders`.** Both rewrite `r.RemoteAddr` to a bare ip taken from a forwarded
+   header. Inside them, camada sees an unreadable peer on a TCP listener: no ip, so ip blocks and
+   challenges fail open (camada logs a warning, at most once a minute). Outside them, camada reads
+   the real socket peer and your trusted-proxy config decides; the app behind still gets the
+   rewritten `RemoteAddr`.
 3. Enforces before anything else, beacon endpoints included: your ordered custom rules first (first
    match wins; they read ip, path, user-agent and request headers), then allow → block → challenge.
    A block answers `403 Forbidden` with `x-block-reason`, `x-block-version` and, when a rule
