@@ -78,3 +78,98 @@ func TestEnvStringForms(t *testing.T) {
 		}
 	}
 }
+
+// camada-all-0vho: an X-Forwarded-For entry may carry a port (Azure Application Gateway writes `ip:port`).
+func TestXFFEntriesWithAPortResolveToTheAddress(t *testing.T) {
+	hops1 := &TrustedProxy{Mode: "hops", Hops: 1}
+	azure := &TrustedProxy{Mode: "cidrs", CIDRs: []string{"169.254.0.0/16"}}
+	for _, c := range []struct {
+		xff  string
+		cfg  *TrustedProxy
+		want string
+	}{
+		{"203.0.113.66:51234", hops1, "203.0.113.66"},
+		{"[2001:db8::66]:51234", hops1, "2001:db8::66"},
+		{"[2001:db8::66]", hops1, "2001:db8::66"},
+		{"2001:db8::66:8080", hops1, "2001:db8::66:8080"}, // a bare v6 is never split
+		{"203.0.113.66:51234", &TrustedProxy{Mode: "vercel"}, "203.0.113.66"},
+		{"203.0.113.66:51234", azure, "203.0.113.66"},
+		{"203.0.113.66, 169.254.1.1:5000", azure, "203.0.113.66"}, // the trust test sees the address
+	} {
+		if got := ResolveClientIP("169.254.130.1", c.xff, c.cfg); got != c.want {
+			t.Errorf("xff %q: got %q want %q", c.xff, got, c.want)
+		}
+	}
+}
+
+func TestMalformedPortEntriesFallBackToThePeer(t *testing.T) {
+	for _, bad := range []string{"203.0.113.66:", "203.0.113.66:abc", "203.0.113.66:123456", "203.0.113.66:80:90", "[2001:db8::66:51234",
+		"[2001:db8::66]:", "[2001:db8::66]x", "[203.0.113.66]:80", "[]:80", "not-an-ip:80", "203.0.113.256:80"} {
+		if got := ResolveClientIP("169.254.130.1", bad, &TrustedProxy{Mode: "hops", Hops: 1}); got != "169.254.130.1" {
+			t.Errorf("xff %q: got %q", bad, got)
+		}
+	}
+}
+
+// camada-all-yfc6 (D1): in cidrs mode the chain is [...xff, peer]. A peer outside every trusted range is the client and
+// its XFF is ignored; a loopback peer is a local front end (App Engine's is always 127.0.0.1) and counts as a trusted hop.
+var cfPreset = []string{"173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "141.101.64.0/18", "108.162.192.0/18",
+	"190.93.240.0/20", "188.114.96.0/20", "197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+	"104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22", "2400:cb00::/32", "2606:4700::/32", "2803:f800::/32",
+	"2405:b500::/32", "2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32"}
+
+func TestTrialsightsAppEngineBehindCloudflareStillResolvesTheClient(t *testing.T) {
+	// the Trialsights shape: the peer is App Engine's local front end, Google appends 169.254.1.1, Cloudflare's edge
+	// sits in front of that, and the leftmost entry is client-written
+	cfg := &TrustedProxy{Mode: "cidrs", CIDRs: append(append([]string{}, cfPreset...), "169.254.0.0/16")}
+	for _, xff := range []string{"6.6.6.6, 198.51.100.9, 172.64.1.1, 169.254.1.1", "6.6.6.6, 198.51.100.9, 169.254.1.1"} {
+		if got := ResolveClientIP("127.0.0.1", xff, cfg); got != "198.51.100.9" {
+			t.Errorf("xff %q: got %q", xff, got)
+		}
+	}
+}
+
+func TestCidrsDirectHitFromAnUntrustedPeerIgnoresXFF(t *testing.T) {
+	cf := &TrustedProxy{Mode: "cidrs", CIDRs: cfPreset}
+	for _, xff := range []string{"203.0.113.66", "8.8.8.8", "8.8.8.8, 172.64.1.1"} {
+		for _, peer := range []string{"203.0.113.200", "::ffff:203.0.113.200", "::FFFF:203.0.113.200"} {
+			if got := ResolveClientIP(peer, xff, cf); got != "203.0.113.200" {
+				t.Errorf("peer %q xff %q: got %q", peer, xff, got)
+			}
+		}
+	}
+	if got := ResolveClientIP("2001:db8::99", "198.51.100.9", cf); got != "2001:db8::99" {
+		t.Errorf("v6 peer: got %q", got)
+	}
+	if got := ResolveClientIP("172.64.1.1", "1.2.3.4, 198.51.100.9", cf); got != "198.51.100.9" { // a trusted peer still walks
+		t.Errorf("trusted peer: got %q", got)
+	}
+}
+
+func TestLoopbackPeerIsATrustedHopOnlyAsThePeer(t *testing.T) {
+	cf := &TrustedProxy{Mode: "cidrs", CIDRs: cfPreset}
+	for _, peer := range []string{"127.0.0.1", "127.5.6.7", "::1", "0:0:0:0:0:0:0:1", "::ffff:127.0.0.1"} {
+		if got := ResolveClientIP(peer, "198.51.100.9, 172.64.1.1", cf); got != "198.51.100.9" {
+			t.Errorf("peer %q: got %q", peer, got)
+		}
+	}
+	if got := ResolveClientIP("127.0.0.1", "8.8.8.8", cf); got != "8.8.8.8" { // D1's accepted trade-off
+		t.Errorf("front end: got %q", got)
+	}
+	if got := ResolveClientIP("172.64.1.1", "127.0.0.1", cf); got != "127.0.0.1" { // a loopback XFF entry is untrusted
+		t.Errorf("loopback entry: got %q", got)
+	}
+}
+
+func TestNoPeerKeepsThePlainWalk(t *testing.T) {
+	cf := &TrustedProxy{Mode: "cidrs", CIDRs: cfPreset}
+	if got := ResolveClientIP("", "1.2.3.4, 198.51.100.9, 172.64.1.1", cf); got != "198.51.100.9" {
+		t.Errorf("got %q", got)
+	}
+	if got := ResolveClientIP("", "172.64.1.1", cf); got != "" {
+		t.Errorf("all trusted: got %q", got)
+	}
+	if got := ResolveClientIP("@", "198.51.100.9, 172.64.1.1", cf); got != "198.51.100.9" { // a unix-socket peer: a local proxy
+		t.Errorf("unix socket peer: got %q", got)
+	}
+}

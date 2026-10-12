@@ -5,6 +5,9 @@ import "github.com/camada-app/camada-go/internal/redact"
 // ScrubQuery replaces credential-looking query values with ~r, preserving structure and order.
 func ScrubQuery(query string) string { return redact.ScrubQuery(query) }
 
+// ScrubURL is a URL (a Referer) with its query and fragment run through ScrubQuery; the path is kept.
+func ScrubURL(url string) string { return redact.ScrubURL(url) }
+
 // BodyShape is a decoded JSON body's field names and sizes, never its values; nil for a non-object.
 func BodyShape(obj any) map[string]int { return redact.BodyShape(obj) }
 

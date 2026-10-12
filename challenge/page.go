@@ -9,8 +9,18 @@ package challenge
 //
 // The page carries its own SHA-256 rather than calling crypto.subtle: subtle is undefined on
 // non-secure origins (plain http on a LAN host), and 65k awaited digests would be slow anyway.
+//
+// CSP (camada-all-y38o, core's mwpo): the inline script and style depend on `bits` alone (the
+// solver reads the nonce from the form), so their hashes are fixed per difficulty and PageCSP(bits)
+// can allow exactly them. The engine sends that policy with the page and the net/http adapter drops
+// any policy already on the response, so a strict app CSP cannot block the solver.
 
-import "strconv"
+import (
+	"crypto/sha256"
+	"encoding/base64"
+	"strconv"
+	"sync"
+)
 
 // FIPS 180-4 round constants (cube roots of the first 64 primes).
 const roundK = "0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5," +
@@ -60,10 +70,29 @@ const style = ":root{color-scheme:light}\n" +
 	".bar i{display:block;height:100%;width:30%;background:#1a1a1a;animation:camada-slide 1.1s ease-in-out infinite}\n" +
 	"@keyframes camada-slide{0%{transform:translateX(-120%)}100%{transform:translateX(400%)}}\n"
 
+func clampBits(bits int) int { return min(32, max(1, bits)) } // shift 32-bits must stay in range
+
+// solverScript is the page's one inline script. It depends on `bits` only: the nonce comes from the form.
+func solverScript(bits int) string {
+	return solver + "\n" +
+		"(function(){\n" +
+		"  if(typeof window==='undefined'||window.__camadaAutostart===false)return;\n" +
+		"  var nonce=document.getElementById('camada-n').value,shift=" + strconv.Itoa(32-bits) + ";\n" +
+		"  function go(){\n" +
+		"    for(var n=0;n<5000000;n++){\n" +
+		"      if((__camadaSha256Words(nonce+'.'+n)[0]>>>shift)===0){\n" +
+		"        document.getElementById('camada-s').value=String(n);\n" +
+		"        document.getElementById('camada-f').submit();\n" +
+		"        return}}\n" +
+		"    document.getElementById('camada-msg').textContent='Could not complete the check. Please reload.'}\n" +
+		"  setTimeout(go,30);\n" +
+		"})();\n"
+}
+
 // Page renders the challenge. `action` is the verify endpoint path; `to` has already been
 // through SafeReturnTo; `bits` is the difficulty (PowBits in production).
 func Page(nonce, action, to string, bits int) string {
-	bits = min(32, max(1, bits)) // shift 32-bits must stay in range
+	bits = clampBits(bits)
 	return "<!doctype html>\n" +
 		`<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` + "\n" +
 		"<title>Checking your browser</title>\n" +
@@ -76,23 +105,32 @@ func Page(nonce, action, to string, bits int) string {
 		`<div class="bar"><i></i></div>` + "\n" +
 		"</main>\n" +
 		`<form id="camada-f" method="POST" action="` + EscapeAttr(action) + `">` + "\n" +
-		`<input type="hidden" name="nonce" value="` + EscapeAttr(nonce) + `">` + "\n" +
+		`<input type="hidden" name="nonce" value="` + EscapeAttr(nonce) + `" id="camada-n">` + "\n" +
 		`<input type="hidden" name="solution" id="camada-s">` + "\n" +
 		`<input type="hidden" name="to" value="` + EscapeAttr(to) + `">` + "\n" +
 		"</form>\n" +
-		"<script>" + solver + "\n" +
-		"(function(){\n" +
-		"  if(typeof window==='undefined'||window.__camadaAutostart===false)return;\n" +
-		"  var nonce=" + EscapeScript(nonce) + ",shift=" + strconv.Itoa(32-bits) + ";\n" +
-		"  function go(){\n" +
-		"    for(var n=0;n<5000000;n++){\n" +
-		"      if((__camadaSha256Words(nonce+'.'+n)[0]>>>shift)===0){\n" +
-		"        document.getElementById('camada-s').value=String(n);\n" +
-		"        document.getElementById('camada-f').submit();\n" +
-		"        return}}\n" +
-		"    document.getElementById('camada-msg').textContent='Could not complete the check. Please reload.'}\n" +
-		"  setTimeout(go,30);\n" +
-		"})();\n" +
-		"</script>\n" +
+		"<script>" + solverScript(bits) + "</script>\n" +
 		"</body></html>"
+}
+
+func sha256Src(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+}
+
+var cspCache sync.Map // bits -> policy
+
+// PageCSP is the Content-Security-Policy to send with Page(..., bits): it allows only the page's own
+// inline script and style (by 'sha256-...' hash), a form post to the same origin, and nothing else.
+// Send it as the response's only CSP, removing any Content-Security-Policy or
+// Content-Security-Policy-Report-Only the app set.
+func PageCSP(bits int) string {
+	bits = clampBits(bits)
+	if csp, ok := cspCache.Load(bits); ok {
+		return csp.(string)
+	}
+	csp := "default-src 'none'; script-src " + sha256Src(solverScript(bits)) + "; style-src " + sha256Src("\n"+style) + "; " +
+		"form-action 'self'; base-uri 'none'; frame-ancestors 'self'"
+	cspCache.Store(bits, csp)
+	return csp
 }
