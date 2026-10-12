@@ -554,7 +554,15 @@ func TestVerifySetsCchRedirectsBackAndShipsCh1(t *testing.T) {
 	if h.call(call{path: "/back", headers: append(htmlNav, [2]string{"cookie", pair}), peer: "192.0.2.21"}).status != 200 { // not challenged at all
 		t.Fatal("neighbour challenged")
 	}
-	forged := "_cch=" + strings.Replace(pair[5:], "0", "1", 1)
+	// flip the first character of the MAC to a different one, so forged != pair always
+	flip := byte('a')
+	if pair[5] == 'a' {
+		flip = 'b'
+	}
+	forged := pair[:5] + string(flip) + pair[6:]
+	if forged == pair {
+		t.Fatal("forgery equals the real cookie")
+	}
 	if h.call(call{path: "/back", headers: append(htmlNav, [2]string{"cookie", forged}), peer: testutil.ChallengedIP}).status != 403 {
 		t.Fatal("forged cookie passed")
 	}
