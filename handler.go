@@ -164,6 +164,14 @@ func readBody(r *http.Request, limit int) []byte {
 func writeAnswer(w http.ResponseWriter, a *Answer) {
 	h := w.Header()
 	for _, kv := range a.Headers {
+		if strings.EqualFold(kv.Name, "content-security-policy") {
+			// the challenge page brings its own policy: one a middleware or the app already set on this response
+			// would ride along and block the solver (camada-all-y38o)
+			h.Del("Content-Security-Policy")
+			h.Del("Content-Security-Policy-Report-Only")
+		}
+	}
+	for _, kv := range a.Headers {
 		h.Add(kv.Name, kv.Value)
 	}
 	h.Set("Content-Length", strconv.Itoa(len(a.Body)))

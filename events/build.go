@@ -109,6 +109,10 @@ func BuildWireEvent(r RequestInfo, tap, rid, sid string, newSession bool, ja4 st
 		}
 		return v
 	}
+	var ref any // the Referer's query and fragment are scrubbed like q (camada-all-ijsa): the last page's token stays here
+	if v, ok := first["referer"]; ok {
+		ref = redact.ScrubURL(v)
+	}
 	qn := 0
 	if len(r.Query) > 1 {
 		for _, p := range strings.Split(r.Query[1:], "&") {
@@ -137,7 +141,7 @@ func BuildWireEvent(r RequestInfo, tap, rid, sid string, newSession bool, ja4 st
 		"ct": h("content-type"), "cl": h("content-length"),
 		"ua": h("user-agent"), "chua": h("sec-ch-ua"), "chmob": h("sec-ch-ua-mobile"), "chplat": h("sec-ch-ua-platform"),
 		"acc": h("accept"), "lang": h("accept-language"), "fs": h("sec-fetch-site"), "fm": h("sec-fetch-mode"),
-		"fd": h("sec-fetch-dest"), "fu": h("sec-fetch-user"), "ref": h("referer"), "org": h("origin"),
+		"fd": h("sec-fetch-dest"), "fu": h("sec-fetch-user"), "ref": ref, "org": h("origin"),
 		"xrw":  h("x-requested-with"),
 		"auth": nullable(AuthScheme(first["authorization"])), // scheme only, never the credential
 		"hm":   mask, "hn": hn, "hb": hb, "ck": ck,

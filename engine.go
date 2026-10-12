@@ -408,7 +408,10 @@ func (c *Camada) challengePassed(req *Req, ip string) bool {
 
 func (c *Camada) page(ip, to string) *Answer {
 	html := challenge.Page(c.Kit.Nonce(ip, c.NowMS()), c.ChallengePath, to, challenge.PowBits)
-	headers := []Header{hdr("content-type", "text/html; charset=utf-8"), hdr("cache-control", "no-store"), hdr("x-camada-challenge", "1")}
+	headers := []Header{
+		hdr("content-type", "text/html; charset=utf-8"), hdr("cache-control", "no-store"), hdr("x-camada-challenge", "1"),
+		hdr("content-security-policy", challenge.PageCSP(challenge.PowBits)), // only its own inline solver and style (camada-all-y38o)
+	}
 	return &Answer{403, headers, []byte(html)}
 }
 

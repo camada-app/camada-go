@@ -9,11 +9,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/camada-app/camada-go/challenge"
 	"github.com/camada-app/camada-go/internal/testutil"
 )
 
@@ -491,6 +493,9 @@ func TestServesThePageForAnHTMLNavigationAndShipsBlkChallenge(t *testing.T) {
 	if !strings.Contains(r.body, `action="/__camada/challenge"`) || !strings.Contains(r.body, `name="to" value="/account?tab=1"`) {
 		t.Fatal("page")
 	}
+	if csp := r.headers.Values("Content-Security-Policy"); len(csp) != 1 || csp[0] != challenge.PageCSP(challenge.PowBits) { // camada-all-y38o
+		t.Fatalf("csp %q", csp)
+	}
 	if len(h.seen) != 0 {
 		t.Fatal("the app ran")
 	}
@@ -600,8 +605,34 @@ func TestChallengeSwitchedOffByEnvOrOption(t *testing.T) {
 	}
 }
 
+func TestThePageReplacesAPolicyAnOuterMiddlewareSet(t *testing.T) {
+	// camada-all-y38o: a security-headers middleware outside camada sets a strict CSP on every response before
+	// calling next; the challenge answer must go out with only its own
+	e := engineWith(t, v4(t), nil, Options{})
+	loaded(t, e)
+	inner := e.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("app")) }))
+	outer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "script-src 'self'")
+		w.Header().Set("Content-Security-Policy-Report-Only", "default-src 'self'")
+		inner.ServeHTTP(w, r)
+	})
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = testutil.ChallengedIP + ":1"
+	r.Header.Set("accept", "text/html")
+	r.Header.Set("sec-fetch-dest", "document")
+	outer.ServeHTTP(rec, r)
+	if csp := rec.Header().Values("Content-Security-Policy"); rec.Code != 403 || len(csp) != 1 || csp[0] != challenge.PageCSP(challenge.PowBits) ||
+		rec.Header().Get("Content-Security-Policy-Report-Only") != "" {
+		t.Fatalf("%d %v", rec.Code, rec.Header())
+	}
+}
+
 func TestServeChallengeOnDemand(t *testing.T) {
 	h := newHost(t, v4(t), hostOpts{handler: func(w http.ResponseWriter, r *http.Request) {
+		// a site-wide policy the app's middleware set before the handler ran (camada-all-y38o: the page's own replaces it)
+		w.Header().Set("Content-Security-Policy", "script-src 'self'")
+		w.Header().Set("Content-Security-Policy-Report-Only", "default-src 'self'")
 		if ServeChallenge(w, r) {
 			return
 		}
@@ -610,6 +641,9 @@ func TestServeChallengeOnDemand(t *testing.T) {
 	r := h.call(call{path: "/challenge-me", headers: htmlNav})
 	if r.status != 403 || !strings.Contains(r.body, "camada-f") {
 		t.Fatalf("%+v", r)
+	}
+	if csp := r.headers.Values("Content-Security-Policy"); len(csp) != 1 || csp[0] != challenge.PageCSP(challenge.PowBits) || r.header("Content-Security-Policy-Report-Only") != "" {
+		t.Fatalf("the app's policy rode along: %v", r.headers)
 	}
 	evs := h.events()
 	if len(evs) != 1 || evs[0]["blk"] != "challenge" { // one request, one event

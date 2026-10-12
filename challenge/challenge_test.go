@@ -5,8 +5,11 @@ package challenge_test
 // from camada-core/test/challenge.test.ts via camada-python/tests/test_challenge.py.
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -205,5 +208,59 @@ func TestDifficultyIsClamped(t *testing.T) {
 	}
 	if !strings.Contains(challenge.Page(strings.Repeat("a", 32), "/v", "/", 0), "shift=31") {
 		t.Fatal("bits below 1")
+	}
+}
+
+var inlineRE = map[string]*regexp.Regexp{"script": regexp.MustCompile(`(?s)<script>(.*?)</script>`), "style": regexp.MustCompile(`(?s)<style>(.*?)</style>`)}
+
+func inline(t *testing.T, page, tag string) string {
+	t.Helper()
+	m := inlineRE[tag].FindAllStringSubmatch(page, -1)
+	if len(m) != 1 {
+		t.Fatalf("%d inline <%s> blocks", len(m), tag)
+	}
+	return m[0][1]
+}
+
+func shaSrc(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+}
+
+// camada-all-y38o (core's mwpo): the page sends its own CSP allowing only its inline solver and style by hash, so an
+// app-wide strict CSP cannot block the solver. The script reads the nonce from the form, so it is fixed per bits.
+func TestPageCSPAllowsExactlyTheServedInlineScriptAndStyle(t *testing.T) {
+	for _, bits := range []int{1, 12, 16, 20, 32} {
+		page := challenge.Page("abc123", "/__camada/challenge", "/x", bits)
+		csp := challenge.PageCSP(bits)
+		for _, want := range []string{"script-src " + shaSrc(inline(t, page, "script")) + ";", "style-src " + shaSrc(inline(t, page, "style")) + ";",
+			"default-src 'none'", "form-action 'self'"} {
+			if !strings.Contains(csp, want) {
+				t.Errorf("bits %d: %q lacks %q", bits, csp, want)
+			}
+		}
+		if strings.Contains(csp, "unsafe") {
+			t.Errorf("bits %d: %q", bits, csp)
+		}
+	}
+}
+
+func TestPageCSPIsFixedPerBitsAndTheNonceStaysInTheForm(t *testing.T) {
+	a := challenge.Page("aaaa", "/a", "/one", challenge.PowBits)
+	b := challenge.Page("bbbb", "/b", `/two?x="y`, challenge.PowBits)
+	if inline(t, a, "script") != inline(t, b, "script") || strings.Contains(inline(t, a, "script"), "aaaa") {
+		t.Fatal("the script varies per request")
+	}
+	if !strings.Contains(a, `name="nonce" value="aaaa" id="camada-n"`) {
+		t.Fatal("nonce input")
+	}
+	if challenge.PageCSP(12) == challenge.PageCSP(16) || challenge.PageCSP(99) != challenge.PageCSP(32) || challenge.PageCSP(0) != challenge.PageCSP(1) {
+		t.Fatal("per-bits / clamping")
+	}
+	// @camada/core challengePageCsp(16) (src/challenge/page.ts): the page is byte-for-byte core's, so the hashes match
+	core := "default-src 'none'; script-src 'sha256-ciEqEwbzJaoB3rni2OdS8TuYa+/yFdFMAkRscUn8z8k='; " +
+		"style-src 'sha256-uTQFkKw4mZsBeb9oMeUmhuhVK7WwsKvYVU1JAzADMu0='; form-action 'self'; base-uri 'none'; frame-ancestors 'self'"
+	if got := challenge.PageCSP(challenge.PowBits); got != core {
+		t.Fatalf("PageCSP(16) = %q\nwant core's %q", got, core)
 	}
 }

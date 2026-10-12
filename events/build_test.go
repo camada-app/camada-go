@@ -116,3 +116,15 @@ func TestHdrsBitmaskPinsTheExactHeaderOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestRefererShipsWithItsQueryScrubbed(t *testing.T) {
+	// camada-all-ijsa: the request's own query was scrubbed, the Referer shipped verbatim
+	jwt := "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLTQyIn0.sig-sig-sig"
+	ev := BuildWireEvent(req([]Header{{"Referer", "https://x.test/reset-password?token=" + jwt + "&code=4/0AbC"}}, "", "1.2.3.4"), "sdk-go", "r", "", false, "")
+	if ev["ref"] != "https://x.test/reset-password?token=~r&code=~r" {
+		t.Fatalf("ref = %v", ev["ref"])
+	}
+	if ev := BuildWireEvent(req([]Header{{"Origin", "https://x.test"}}, "", "1.2.3.4"), "sdk-go", "r", "", false, ""); ev["ref"] != nil {
+		t.Fatalf("no Referer: ref = %#v", ev["ref"])
+	}
+}

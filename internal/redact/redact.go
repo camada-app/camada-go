@@ -51,6 +51,21 @@ func ScrubQuery(query string) string {
 	return lead + strings.Join(parts, "&")
 }
 
+// ScrubURL is a URL (a Referer) with its query and fragment run through ScrubQuery (camada-all-ijsa); the scheme,
+// host and path are kept as they are. The path is left alone on purpose: it gets the same treatment as the request's
+// own path `p` (none). A same-origin Referer's path already shipped as `p` on that page's own event, and a
+// cross-origin one carries only the origin under the browsers' default Referrer-Policy.
+func ScrubURL(url string) string {
+	head, frag, hasFrag := strings.Cut(url, "#")
+	if q := strings.IndexByte(head, '?'); q != -1 {
+		head = head[:q] + ScrubQuery(head[q:])
+	}
+	if hasFrag {
+		return head + "#" + ScrubQuery(frag)
+	}
+	return head
+}
+
 // BodyShape is the body's shape only: field names and sizes, never values. One level deep; nil
 // when the body is not an object.
 func BodyShape(obj any) map[string]int {

@@ -25,6 +25,55 @@ func validIP(s string) bool {
 	return ok
 }
 
+// stripPort is one X-Forwarded-For entry without its port (camada-all-0vho): `[v6]:port` and `[v6]` -> `v6`,
+// `a.b.c.d:port` -> `a.b.c.d`. A bare IPv6 literal comes back whole (its last group is never a port); anything else
+// malformed comes back unchanged, so validation still rejects it and the peer wins.
+func stripPort(e string) string {
+	if strings.HasPrefix(e, "[") {
+		end := strings.IndexByte(e, ']')
+		if end == -1 {
+			return e
+		}
+		inner, rest := e[1:end], e[end+1:]
+		if strings.Contains(inner, ":") && (rest == "" || isPort(rest)) {
+			return inner
+		}
+		return e
+	}
+	colon := strings.IndexByte(e, ':')
+	if colon == -1 || strings.IndexByte(e[colon+1:], ':') != -1 {
+		return e // no colon, or a bare IPv6 literal
+	}
+	if _, ok := ParseIP4(e[:colon]); ok && isPort(e[colon:]) {
+		return e[:colon]
+	}
+	return e
+}
+
+// isPort is `:` followed by 1-5 ASCII digits.
+func isPort(s string) bool {
+	if len(s) < 2 || len(s) > 6 || s[0] != ':' {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// isLoopback is 127.0.0.0/8 or ::1 (camada-all-yfc6, decision D1). The peer's `::ffff:127.x.x.x` form is already
+// reduced to the dotted quad by ResolveClientIP.
+func isLoopback(ip string) bool {
+	if !strings.Contains(ip, ":") {
+		n, ok := ParseIP4(ip)
+		return ok && n>>24 == 127
+	}
+	w, ok := ParseIP6(ip)
+	return ok && w == Words{0, 0, 0, 1}
+}
+
 func parseCIDR(c string) (cidr, bool) {
 	slash := strings.IndexByte(c, '/')
 	if slash == -1 {
@@ -82,14 +131,27 @@ func inCIDR(ip string, c cidr) bool {
 
 // ResolveClientIP is the client IP from the socket peer and X-Forwarded-For per the
 // trusted-proxy config. Anything unresolvable falls back to the peer (fail safe); "" is no address.
+//
+// XFF entries are read without a port (`ip:port`, `[v6]:port`, as Azure writes them) in every mode.
+//
+// `cidrs` (also what the dashboard's Cloudflare option stores) walks the chain `[...xff, peer]` from the right: if
+// the peer is not a trusted proxy, the request did not come through one and the peer IS the client; XFF is ignored,
+// since anyone hitting the origin directly can write it. A loopback peer (127.0.0.0/8, ::1, ::ffff:127.x.x.x) counts
+// as a trusted hop: it is a local front end or sidecar (App Engine's is always 127.0.0.1), and no remote client can be
+// one. Loopback is trusted only as the peer, never as an XFF entry. With no peer at all (peer "", or not an ip, as
+// on a unix socket) the walk runs over XFF alone: such a host trusts its network edge to have written XFF, and the
+// app must not be reachable around that edge. `hops` and `vercel` trust XFF by definition and ignore the peer.
 func ResolveClientIP(peer, xff string, cfg *TrustedProxy) string {
-	sock := strings.TrimPrefix(peer, "::ffff:") // dual-stack v4-mapped form
+	sock := peer
+	if len(sock) >= 7 && strings.EqualFold(sock[:7], "::ffff:") {
+		sock = sock[7:] // dual-stack v4-mapped form
+	}
 	if cfg == nil || cfg.Mode == "none" || xff == "" {
 		return sock
 	}
 	var entries []string
 	for _, e := range strings.Split(xff, ",") {
-		if e = strings.TrimSpace(e); e != "" {
+		if e = stripPort(strings.TrimSpace(e)); e != "" {
 			entries = append(entries, e)
 		}
 	}
@@ -110,6 +172,11 @@ func ResolveClientIP(peer, xff string, cfg *TrustedProxy) string {
 			if c, ok := parseCIDR(x); ok {
 				trusted = append(trusted, c)
 			}
+		}
+		// the peer is the first hop: if it is not a trusted proxy, it is the client. A peer that is not an ip (a unix
+		// socket: a local proxy) is no network peer at all, as core sees it, and keeps the walk.
+		if validIP(sock) && !isLoopback(sock) && !anyCIDR(sock, trusted) {
+			return sock
 		}
 		for i := len(entries) - 1; i >= 0; i-- {
 			if !anyCIDR(entries[i], trusted) {
