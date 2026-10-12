@@ -271,7 +271,10 @@ func (c *Camada) decideRequest(req *Req, body []byte) (*Answer, *Passed) {
 	// custom rules read the user agent and the request headers (§D3).
 	v := c.Snap.Verdict(snapshot.MatchInput{IP: ip, Path: req.Path, UA: req.header("user-agent"), Header: req.Header})
 	if v.Block {
-		headers := []Header{hdr("content-type", "text/plain"), hdr("x-block-reason", v.Reason), hdr("x-block-version", v.Version)}
+		headers := []Header{
+			hdr("content-type", "text/plain"), hdr("cache-control", "no-store"), // per-visitor: no shared cache keeps it (camada-all-8lp6)
+			hdr("x-block-reason", v.Reason), hdr("x-block-version", v.Version),
+		}
 		if v.Rule != "" {
 			headers = append(headers, hdr("x-block-rule", v.Rule)) // a custom rule blocked: name it, so the customer knows which row to edit
 		}

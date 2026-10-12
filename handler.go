@@ -170,6 +170,10 @@ func writeAnswer(w http.ResponseWriter, a *Answer) {
 			h.Del("Content-Security-Policy")
 			h.Del("Content-Security-Policy-Report-Only")
 		}
+		if strings.EqualFold(kv.Name, "cache-control") {
+			// a block or challenge answer is per-visitor: an upstream `public` would let a shared cache keep it (camada-all-8lp6)
+			h.Del("Cache-Control")
+		}
 	}
 	for _, kv := range a.Headers {
 		h.Add(kv.Name, kv.Value)

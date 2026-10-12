@@ -46,6 +46,9 @@ func TestBlockAnswers403BeforeTheAppAndStillShipsTheEvent(t *testing.T) {
 	if r.header("content-type") != "text/plain" || r.header("x-block-rule") != "" {
 		t.Fatalf("headers %v", r.headers)
 	}
+	if cc := r.headers.Values("Cache-Control"); len(cc) != 1 || cc[0] != "no-store" { // per-visitor: no shared cache keeps it (camada-all-8lp6)
+		t.Fatalf("cache-control %v", cc)
+	}
 	if len(h.seen) != 0 {
 		t.Fatal("the app ran")
 	}
@@ -428,7 +431,7 @@ func TestSkipRuleBeatsTheWiderBlock(t *testing.T) {
 func TestBlocksByRuleWithXBlockRuleAndShipsRL(t *testing.T) {
 	h := newHost(t, v5(t), hostOpts{})
 	r := h.call(call{path: "/", headers: xff(testutil.RuleBlockedIP)})
-	if r.status != 403 || r.header("x-block-reason") != "rule" || r.header("x-block-rule") != "builtin:block" {
+	if r.status != 403 || r.header("x-block-reason") != "rule" || r.header("x-block-rule") != "builtin:block" || r.header("cache-control") != "no-store" {
 		t.Fatalf("%+v", r)
 	}
 	ev := h.events()[0]
@@ -821,5 +824,24 @@ func TestServerlessModeRefreshesFromTheRequestPath(t *testing.T) {
 	pinned := newHost(t, a, hostOpts{opts: Options{Refresh: 7 * time.Second}})
 	if pinned.engine.Snap.RefreshInterval() != 7*time.Second {
 		t.Fatal("refresh not handed to the client")
+	}
+}
+
+func TestABlockReplacesACacheControlAnOuterMiddlewareSet(t *testing.T) {
+	// camada-all-8lp6: a CDN-friendly middleware outside camada marks every response public; the per-visitor
+	// block 403 must go out with only no-store, or a shared cache serves it to the next visitor
+	e := engineWith(t, testutil.NewFakeAnalyst(t), nil, Options{})
+	loaded(t, e)
+	inner := e.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("app")) }))
+	outer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=600")
+		inner.ServeHTTP(w, r)
+	})
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = testutil.BlockedIP + ":1"
+	outer.ServeHTTP(rec, r)
+	if cc := rec.Header().Values("Cache-Control"); rec.Code != 403 || len(cc) != 1 || cc[0] != "no-store" {
+		t.Fatalf("%d %v", rec.Code, rec.Header())
 	}
 }
