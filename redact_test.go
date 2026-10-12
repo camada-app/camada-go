@@ -62,3 +62,20 @@ func TestHashUserIDIsALabelledTruncatedHMAC(t *testing.T) {
 		t.Fatal("not 32 hex chars")
 	}
 }
+
+func TestScrubURLScrubsQueryAndFragmentButNotThePath(t *testing.T) {
+	// camada-all-ijsa: the Referer carries the previous page's query (a reset token, an OAuth code)
+	for _, c := range []struct{ in, want string }{
+		{"https://a.test/reset?token=abc&x=1", "https://a.test/reset?token=~r&x=1"},
+		{"https://a.test/cb#access_token=t&n=1", "https://a.test/cb#access_token=~r&n=1"},
+		{"https://a.test/p?code=1#code=2", "https://a.test/p?code=~r#code=~r"},
+		{"https://a.test/p?a=1#x?token=2", "https://a.test/p?a=1#x?token=~r"}, // the first # ends the query
+		{"https://a.test/reset/abc123", "https://a.test/reset/abc123"},
+		{"https://a.test/p?", "https://a.test/p?"},
+		{"", ""},
+	} {
+		if got := ScrubURL(c.in); got != c.want {
+			t.Errorf("ScrubURL(%q) = %q want %q", c.in, got, c.want)
+		}
+	}
+}

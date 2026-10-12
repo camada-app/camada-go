@@ -69,7 +69,11 @@ http.ListenAndServe(":8080", cam.Handler(mux))
    only under your tenant's trusted-proxy config (or `CAMADA_TRUSTED_PROXY` locally). A forwarded
    header on its own is never the ip: any caller can set it. Nothing needs disabling for proxies —
    `net/http` never rewrites the peer — so a reverse proxy in front of the app is declared, not
-   inferred.
+   inferred. Entries may carry a port (`ip:port`, `[v6]:port`, as Azure Application Gateway writes
+   them). Under `cidrs` (and the dashboard's Cloudflare option, stored as `cidrs`) the socket peer
+   must itself be one of the trusted ranges or a loopback address (a local front end or sidecar);
+   otherwise the peer is the client and `X-Forwarded-For` is ignored, so a direct hit on your origin
+   cannot pick its own ip. A peer that is not an ip (a unix socket) keeps the plain walk.
 3. Enforces before anything else, beacon endpoints included: your ordered custom rules first (first
    match wins; they read ip, path, user-agent and request headers), then allow → block → challenge.
    A block answers `403 Forbidden` with `x-block-reason`, `x-block-version` and, when a rule
@@ -77,13 +81,16 @@ http.ListenAndServe(":8080", cam.Handler(mux))
    `wrn`; a `skip` rule passes with nothing stamped. Cold (no snapshot yet) passes: fail open.
 4. Challenge: a `challenge` verdict gets the self-contained proof-of-work page (or 403 JSON for a
    non-HTML request); `POST /__camada/challenge` verifies the solution, sets `_cch` (bound to the
-   ip, one hour) and 302s back. A request whose ip cannot be resolved is never challenged.
+   ip, one hour) and 302s back. A request whose ip cannot be resolved is never challenged. The page
+   carries its own `Content-Security-Policy` (its inline solver and style by hash, `form-action
+   'self'`) and replaces any policy a middleware already put on the response, so a strict site CSP
+   cannot block it.
 5. Serves the beacon: `GET /_cam/b.js` (the `@camada/browser` build, embedded) and `POST /_cam/fp`
    (≤ 32 KB, relayed onto the event batch as a `sig: 1` row with the ip camada resolved). Both
    fall through to your app when the tenant switched the beacon off.
 6. Runs your app with `X-Rid` (the rid of the request's event row; never on a 101 handshake) and
    the `_sfp` session cookie on its response, and when the response is done ships one redacted
-   event: method, host, path, scrubbed query, status, latency, route pattern (`r.Pattern`), header
+   event: method, host, path, scrubbed query (and `Referer` query and fragment), status, latency, route pattern (`r.Pattern`), header
    names/sizes, the auth scheme (never the credential), cookie count (never values). A panic in
    your handler ships as `st: 500` and propagates unchanged (net/http answers as it always does); a
    hijacked connection ships as `st: 101`. A 103 Early Hints is not the status: the final one is.
