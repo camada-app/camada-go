@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.4 (2026-10-12)
 
 - fix: a block 403 (ip/path/asn/country/tls/rule) sends `Cache-Control: no-store` and replaces a `Cache-Control` a middleware already set on the response, so a shared cache or CDN no longer keeps one visitor's block for others. The challenge answers replace an upstream `Cache-Control` the same way. (camada-all-8lp6)
 - fix (security): under trusted proxy `cidrs` (also the dashboard's Cloudflare option) `X-Forwarded-For` is no longer believed from a socket peer that is not a trusted proxy: such a peer is the client. Before this, anyone reaching the origin directly could pick their own client ip, slip past an ip block or get another ip blocked. A loopback peer (127.0.0.0/8, `::1`, `::ffff:127.x.x.x`) counts as a trusted hop; with no peer the walk is unchanged. (camada-all-yfc6)
@@ -12,7 +12,7 @@
 - fix: the challenge page CSP no longer carries `form-action 'self'`, which blocked a post-solve redirect to another origin.
 - fix: a request with no `http.LocalAddrContextKey` (Lambda / API Gateway adapters, `http.NewRequest`) has no socket: a `RemoteAddr` of `""` is no peer and walks `X-Forwarded-For` as before, and a bare ip is the peer. Only a TCP listener's unsplittable `RemoteAddr` is an unreadable peer.
 - docs: mount `camada.Handler` outside chi's `middleware.RealIP` and gorilla's `handlers.ProxyHeaders`. Both rewrite `RemoteAddr` to a bare ip, which on a TCP listener leaves camada with no ip (blocks and challenges fail open); camada now logs a rate-limited warning when it sees one.
-- chore: beacon re-vendored (`@camada/browser` 0.3.1 packaging fix, same behaviour).
+- chore: beacon re-synced to `@camada/browser` 0.3.2.
 - test: the shared C6 v3 conformance cases (`ip/resolve.json`, `redact/referer.json`, `redact/query.json`) run in `sdk_conformance_test.go`.
 
 ## 0.1.3 (2026-10-09)
