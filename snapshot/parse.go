@@ -408,13 +408,21 @@ func compileCond(c Cond, sets *[][2]Bits, deny bool) RuleCond {
 			if !ok || rx == nil {
 				return false
 			}
-			if strip {
-				v = stripControl(v) // regex-cap-sdk S2
+			f := func(s string) bool {
+				if overCap(s) { // S1: never truncate, never run: a deny rule hits, a skip rule misses
+					return deny
+				}
+				return rx.MatchString(s)
 			}
-			if overCap(v) { // S1: never truncate, never run: a deny rule hits, a skip rule misses
-				return deny
+			if !strip {
+				return f(v)
 			}
-			return rx.MatchString(v)
+			stripped := stripControl(v) // one scan (S5); returns v itself when clean
+			if len(stripped) == len(v) {
+				return f(v)
+			}
+			// S5: control chars never widen a skip and never neuter a deny regex
+			return deny && (f(v) || f(stripped))
 		}
 	case "contains":
 		needle := values[0]
