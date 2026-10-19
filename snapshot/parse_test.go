@@ -5,6 +5,7 @@ package snapshot
 
 import (
 	"encoding/binary"
+	"strings"
 	"sync"
 	"testing"
 
@@ -191,7 +192,10 @@ func TestJSRegexSpellingsAreTranslated(t *testing.T) {
 		t.Fatal("\\d matched a non-ASCII digit")
 	}
 	m2 := rulesSnapshot(t, []Rule{{ID: "any", Action: "block", Conds: []Cond{{F: "ua", Op: "matches", V: `^a[^]b\cJ$`}}}}, nil)
-	if m2.Match(MatchInput{UA: "a\nb\n"}).Rule != "any" {
+	if m2.Match(MatchInput{UA: "aXb\n"}).Rule != "" { // control chars are stripped from ua first (regex-cap-sdk S2)
+		t.Fatal("\\cJ matched a ua whose LF is stripped")
+	}
+	if rx := CompileRegex(`^a[^]b\cJ$`); rx == nil || !rx.MatchString("a\nb\n") {
 		t.Fatal("[^] and \\cJ")
 	}
 	if m2.Match(MatchInput{UA: "ab"}).Rule != "" {
@@ -234,5 +238,104 @@ func TestOneMatcherServesConcurrentRequestsWithoutCrosstalk(t *testing.T) {
 	wg.Wait()
 	if wrong != [2]int{} {
 		t.Fatalf("crosstalk: %v", wrong)
+	}
+}
+
+func capMatcher(t *testing.T, action, field, pattern string) *Matcher {
+	t.Helper()
+	return rulesSnapshot(t, []Rule{{ID: "r", Action: action, Conds: []Cond{{F: field, Op: "matches", V: pattern}}}}, nil)
+}
+
+func TestMatchesOverCapDenyHitsSkipMisses(t *testing.T) {
+	for _, action := range []string{"block", "challenge", "warn"} {
+		m := capMatcher(t, action, "ua", "^x")
+		if got := m.Match(MatchInput{UA: strings.Repeat("a", 2048)}).Rule; got != "" {
+			t.Fatalf("%s at the cap: %q", action, got)
+		}
+		if got := m.Match(MatchInput{UA: strings.Repeat("a", 2049)}).Rule; got != "r" {
+			t.Fatalf("%s over the cap: %q", action, got)
+		}
+	}
+	m := rulesSnapshot(t, []Rule{
+		{ID: "s", Action: "skip", Conds: []Cond{{F: "ua", Op: "matches", V: "^x"}}},
+		{ID: "b", Action: "block", Conds: []Cond{{F: "ua", Op: "contains", V: "x"}}},
+	}, nil)
+	if got := m.Match(MatchInput{UA: strings.Repeat("x", 2048)}).Rule; got != "s" {
+		t.Fatalf("skip at the cap: %q", got)
+	}
+	if got := m.Match(MatchInput{UA: strings.Repeat("x", 2049)}).Rule; got != "b" {
+		t.Fatalf("skip over the cap: %q", got)
+	}
+}
+
+func TestCapUnitIsUTF16CodeUnits(t *testing.T) {
+	m := capMatcher(t, "block", "ua", "^x")
+	cases := []struct {
+		name string
+		ua   string
+		want string
+	}{
+		{"e-acute at cap (4096 bytes)", strings.Repeat("é", 2048), ""},
+		{"astral at cap", strings.Repeat("😀", 1024), ""},
+		{"astral over cap", strings.Repeat("😀", 1025), "r"},
+		{"invalid UTF-8 counts bytes, at cap", strings.Repeat("\xff", 2048), ""},
+		{"invalid UTF-8 counts bytes, over cap", strings.Repeat("\xff", 2049), "r"},
+	}
+	for _, c := range cases {
+		if got := m.Match(MatchInput{UA: c.ua}).Rule; got != c.want {
+			t.Errorf("%s: got %q want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestControlCharsAreDeletedBeforeMatches(t *testing.T) {
+	m := rulesSnapshot(t, []Rule{
+		{ID: "ua", Action: "warn", Conds: []Cond{{F: "ua", Op: "matches", V: "Scrapy/[0-9]"}}},
+		{ID: "h", Action: "block", Conds: []Cond{{F: "header", Op: "matches", Name: "x-v", V: `^1\.2$`}}},
+	}, nil)
+	if m.Match(MatchInput{UA: "Scrapy\t/2.11"}).Rule != "ua" || m.Match(MatchInput{UA: "Scr\x00apy/2\x7f.1"}).Rule != "ua" {
+		t.Fatal("ua strip")
+	}
+	hdr := func(n string) (string, bool) { return "1\x7f.2\n", n == "x-v" }
+	if m.Match(MatchInput{Header: hdr}).Rule != "h" {
+		t.Fatal("header strip")
+	}
+	if capMatcher(t, "block", "ua", "^a*$").Match(MatchInput{UA: strings.Repeat("a", 2048) + "\t"}).Rule != "r" {
+		t.Fatal("strip happens before the cap, and the stripped value matches")
+	}
+	if capMatcher(t, "block", "ua", "^b").Match(MatchInput{UA: strings.Repeat("a", 2048) + "\t"}).Rule != "" {
+		t.Fatal("2048 stripped is at the cap")
+	}
+	c := rulesSnapshot(t, []Rule{{ID: "c", Action: "block", Conds: []Cond{{F: "ua", Op: "contains", V: "curl/"}}}}, nil)
+	if c.Match(MatchInput{UA: "cu\x00rl/8"}).Rule != "" {
+		t.Fatal("contains reads the raw value")
+	}
+	if got := stripControl("a\xffb\n\xc3\xa9"); got != "a\xffb\xc3\xa9" {
+		t.Fatalf("invalid UTF-8 must survive the strip: %q", got)
+	}
+}
+
+func TestPathMatchesCap(t *testing.T) {
+	m := rulesSnapshot(t, []Rule{
+		{ID: "s", Action: "skip", Conds: []Cond{{F: "path", Op: "matches", V: "^/static-mirror/"}}},
+		{ID: "b", Action: "block", Conds: []Cond{{F: "path", Op: "matches", V: "^/api/v[0-9]+/dump$"}}},
+	}, nil)
+	cases := []struct{ path, want string }{
+		{"/static-mirror/" + strings.Repeat("a", 2033), "s"},
+		{"/static-mirror/" + strings.Repeat("a", 2034), "b"},
+		{"/x/" + strings.Repeat("a", 2045), ""},
+		{"/x/" + strings.Repeat("a", 2046), "b"},
+		{"/x?" + strings.Repeat("q", 3000), ""},
+		{"/" + strings.Repeat("%61", 700), "b"},
+		{"/static-mirror/" + strings.Repeat("%61", 700), "s"},
+		{"/static-mirror/" + strings.Repeat("./", 1100) + "x", "b"},
+		{"/" + strings.Repeat("é", 400), "b"},
+		{"/api/v2/dump\n", ""},
+		{"/api/v2/dump%0A", ""},
+	}
+	for _, c := range cases {
+		if got := m.Match(MatchInput{Path: c.path}).Rule; got != c.want {
+			t.Errorf("%.40q: got %q want %q", c.path, got, c.want)
+		}
 	}
 }
