@@ -25,3 +25,9 @@ func TestPathFormsMatchTheReference(t *testing.T) {
 		}
 	}
 }
+
+func TestRawControlCharsArePercentEncodedInTheRawForm(t *testing.T) {
+	if got := PathForms("/a\nb\x00\x7f"); got != [3]string{"/a%0ab%00%7f", "/a%0ab%00%7f", "/a%0ab%00%7f"} {
+		t.Fatalf("%q", got)
+	}
+}

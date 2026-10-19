@@ -372,7 +372,7 @@ func safeHeader(r *RuleRequest, name string) (v string, ok bool) {
 func compileCond(c Cond, sets *[][2]Bits, deny bool) RuleCond {
 	f, op := c.F, c.Op
 	if f == "path" { // every path op reads the canonical forms (path.go)
-		pred := pathPred(op, stringValues(c.V))
+		pred := pathPred(op, stringValues(c.V), deny)
 		return func(r *RuleRequest) bool { return pathHit(pred, &r.Paths, deny) }
 	}
 	negate := op == "is_not" || op == "not_in"
@@ -402,9 +402,19 @@ func compileCond(c Cond, sets *[][2]Bits, deny bool) RuleCond {
 	switch op {
 	case "matches":
 		rx := CompileRegex(values[0])
+		strip := f == "ua" || f == "header"
 		return func(r *RuleRequest) bool {
 			v, ok := read(r)
-			return ok && rx != nil && rx.MatchString(v)
+			if !ok || rx == nil {
+				return false
+			}
+			if strip {
+				v = stripControl(v) // regex-cap-sdk S2
+			}
+			if overCap(v) { // S1: never truncate, never run: a deny rule hits, a skip rule misses
+				return deny
+			}
+			return rx.MatchString(v)
 		}
 	case "contains":
 		needle := values[0]
