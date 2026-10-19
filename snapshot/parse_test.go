@@ -192,8 +192,8 @@ func TestJSRegexSpellingsAreTranslated(t *testing.T) {
 		t.Fatal("\\d matched a non-ASCII digit")
 	}
 	m2 := rulesSnapshot(t, []Rule{{ID: "any", Action: "block", Conds: []Cond{{F: "ua", Op: "matches", V: `^a[^]b\cJ$`}}}}, nil)
-	if m2.Match(MatchInput{UA: "aXb\n"}).Rule != "" { // control chars are stripped from ua first (regex-cap-sdk S2)
-		t.Fatal("\\cJ matched a ua whose LF is stripped")
+	if m2.Match(MatchInput{UA: "aXb\n"}).Rule != "any" { // v3 (S5): a deny also tests the raw value, which \cJ reads
+		t.Fatal("\\cJ must match the raw LF for a deny rule")
 	}
 	if rx := CompileRegex(`^a[^]b\cJ$`); rx == nil || !rx.MatchString("a\nb\n") {
 		t.Fatal("[^] and \\cJ")
@@ -303,8 +303,8 @@ func TestControlCharsAreDeletedBeforeMatches(t *testing.T) {
 	if capMatcher(t, "block", "ua", "^a*$").Match(MatchInput{UA: strings.Repeat("a", 2048) + "\t"}).Rule != "r" {
 		t.Fatal("strip happens before the cap, and the stripped value matches")
 	}
-	if capMatcher(t, "block", "ua", "^b").Match(MatchInput{UA: strings.Repeat("a", 2048) + "\t"}).Rule != "" {
-		t.Fatal("2048 stripped is at the cap")
+	if capMatcher(t, "block", "ua", "^b").Match(MatchInput{UA: strings.Repeat("a", 2048) + "\t"}).Rule != "r" {
+		t.Fatal("v3 (S5): raw 2049 is over the cap, a deny hits")
 	}
 	c := rulesSnapshot(t, []Rule{{ID: "c", Action: "block", Conds: []Cond{{F: "ua", Op: "contains", V: "curl/"}}}}, nil)
 	if c.Match(MatchInput{UA: "cu\x00rl/8"}).Rule != "" {
@@ -337,5 +337,50 @@ func TestPathMatchesCap(t *testing.T) {
 		if got := m.Match(MatchInput{Path: c.path}).Rule; got != c.want {
 			t.Errorf("%.40q: got %q want %q", c.path, got, c.want)
 		}
+	}
+}
+
+func TestS5TwoValueRuleForControlChars(t *testing.T) {
+	hdr := func(name, val string) func(string) (string, bool) {
+		return func(n string) (string, bool) { return val, n == name }
+	}
+	if capMatcher(t, "block", "ua", `\t`).Match(MatchInput{UA: "a\tb"}).Rule != "r" {
+		t.Fatal("deny \\t must hit the raw value")
+	}
+	if capMatcher(t, "block", "ua", "sqlmap").Match(MatchInput{UA: "sql\tmap"}).Rule != "r" {
+		t.Fatal("deny sqlmap must hit the stripped value")
+	}
+	hm := rulesSnapshot(t, []Rule{{ID: "h", Action: "block", Conds: []Cond{{F: "header", Op: "matches", Name: "x-v", V: `\t`}}}}, nil)
+	if hm.Match(MatchInput{Header: hdr("x-v", "a\tb")}).Rule != "h" {
+		t.Fatal("header deny on raw")
+	}
+	hs := rulesSnapshot(t, []Rule{{ID: "h", Action: "block", Conds: []Cond{{F: "header", Op: "matches", Name: "x-v", V: "sqlmap"}}}}, nil)
+	if hs.Match(MatchInput{Header: hdr("x-v", "sql\tmap")}).Rule != "h" {
+		t.Fatal("header deny on stripped")
+	}
+	ms := rulesSnapshot(t, []Rule{
+		{ID: "s", Action: "skip", Conds: []Cond{{F: "ua", Op: "matches", V: "^partner-[a-z]+$"}}},
+		{ID: "b", Action: "block", Conds: []Cond{{F: "ua", Op: "contains", V: "partner"}}},
+	}, nil)
+	if ms.Match(MatchInput{UA: "partner-acme"}).Rule != "s" || ms.Match(MatchInput{UA: "partner-acme\n"}).Rule != "b" {
+		t.Fatal("ua skip: clean hits, control chars miss")
+	}
+	mh := rulesSnapshot(t, []Rule{
+		{ID: "s", Action: "skip", Conds: []Cond{{F: "header", Op: "matches", Name: "x-p", V: "^partner-[a-z]+$"}}},
+		{ID: "b", Action: "block", Conds: []Cond{{F: "header", Op: "contains", Name: "x-p", V: "partner"}}},
+	}, nil)
+	if mh.Match(MatchInput{Header: hdr("x-p", "partner-acme")}).Rule != "s" || mh.Match(MatchInput{Header: hdr("x-p", "partner-acme\n")}).Rule != "b" {
+		t.Fatal("header skip: clean hits, control chars miss")
+	}
+	over := strings.Repeat("a", 2048) + "\t"
+	if capMatcher(t, "block", "ua", "^b").Match(MatchInput{UA: over}).Rule != "r" {
+		t.Fatal("raw over cap, stripped under: deny hits")
+	}
+	mo := rulesSnapshot(t, []Rule{
+		{ID: "s", Action: "skip", Conds: []Cond{{F: "ua", Op: "matches", V: "^a+$"}}},
+		{ID: "b", Action: "block", Conds: []Cond{{F: "ua", Op: "contains", V: "a"}}},
+	}, nil)
+	if mo.Match(MatchInput{UA: strings.Repeat("a", 2048)}).Rule != "s" || mo.Match(MatchInput{UA: over}).Rule != "b" {
+		t.Fatal("raw over cap, stripped under: skip misses")
 	}
 }
