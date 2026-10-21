@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// edge-analyst src/freshness.js sdkId: SDK_RE with a name from SDK_NAMES (exact case); anything else is silently dropped from sdk_versions.
+// edge-analyst src/freshness.js sdkId (SDK_RE, exact-case SDK_NAMES): anything else is dropped.
 var analystSDKRE = regexp.MustCompile(`^@camada/go/\d+\.\d+\.\d+[A-Za-z0-9.-]*$`)
 
 func TestSDKIDIsTheFamilyWireIdentity(t *testing.T) {
