@@ -788,6 +788,34 @@ func TestSignalledRequestStampedWhenTheHandlerNeverWrites(t *testing.T) {
 	}
 }
 
+func TestSignalledResponseOverridesEveryCDNCacheHeader(t *testing.T) {
+	names := []string{"Cache-Control", "CDN-Cache-Control", "Surrogate-Control", "Cloudflare-CDN-Cache-Control", "Vercel-CDN-Cache-Control", "Netlify-CDN-Cache-Control"}
+	h := newHost(t, v4(t), hostOpts{handler: func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("CDN-Cache-Control", "public, max-age=60")
+		w.Header()["surrogate-control"] = []string{"max-age=60"} // non-canonical key, as a middleware may write it
+		if r.URL.Path == "/challenge-me/on-demand" {
+			ServeChallenge(w, r)
+		}
+		_, _ = w.Write([]byte("ok"))
+	}})
+	for _, c := range []call{{path: "/challenge-me", headers: jsonFetch, peer: testutil.ChallengedIP}, {path: "/challenge-me/on-demand", headers: jsonFetch}} {
+		path, r := c.path, h.call(c)
+		for _, n := range names {
+			if got := r.headers.Values(n); !reflect.DeepEqual(got, []string{"no-store"}) {
+				t.Fatalf("%s %s: %v", path, n, got)
+			}
+		}
+		if len(r.headers["surrogate-control"]) != 0 {
+			t.Fatalf("%s: stale lowercase key survived", path)
+		}
+	}
+	// not signalled: the app's own headers are untouched
+	r := h.call(call{path: "/open"})
+	if r.header("x-camada-challenge") != "" || r.header("cdn-cache-control") != "public, max-age=60" || r.headers["surrogate-control"][0] != "max-age=60" {
+		t.Fatalf("%+v", r.headers)
+	}
+}
+
 // ---- fail open ----
 
 func TestKeepsServingWhenIngestIsDown(t *testing.T) {
