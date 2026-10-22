@@ -96,9 +96,9 @@ http.ListenAndServe(":8080", cam.Handler(mux))
    A block answers `403 Forbidden` with `x-block-reason`, `x-block-version` and, when a rule
    decided, `x-block-rule`; its event ships with `blk` (and `rl`). A `warn` rule passes and stamps
    `wrn`; a `skip` rule passes with nothing stamped. Cold (no snapshot yet) passes: fail open.
-4. Challenge: a `challenge` verdict gets the self-contained proof-of-work page (or 403 JSON for a
-   non-HTML request); `POST /__camada/challenge` verifies the solution, sets `_cch` (bound to the
-   ip, one hour) and 302s back. A request whose ip cannot be resolved is never challenged. The page
+4. Challenge: a `challenge` verdict gets the self-contained proof-of-work page (a non-HTML request
+   passes to the app with `x-camada-challenge: 1`, `cache-control: no-store` and a `chs: 1` event);
+   `POST /__camada/challenge` verifies the solution, sets `_cch` (bound to the ip, one hour) and 302s back. A request whose ip cannot be resolved is never challenged. The page
    carries its own `Content-Security-Policy` (its inline solver and style by hash, nothing else)
    and replaces any policy a middleware already put on the response, so a strict site CSP cannot
    block it.
@@ -161,8 +161,9 @@ has yet. The event name is free-form; the analyst's app-context rules read this 
 | `payment_failed` / `payment_succeeded` | a payment authorisation settled |
 | `coupon_failed` | a promo/voucher code was rejected |
 
-A route you gate yourself: `if camada.ServeChallenge(w, r) { return }` writes the page (or 403
-JSON) until the browser holds a valid `_cch`, then reports false so you render your own.
+A route you gate yourself: `if camada.ServeChallenge(w, r) { return }` writes the page for a
+page load until the browser holds a valid `_cch`, then reports false so you render your own. A
+non-HTML request also gets false: it is signalled (`x-camada-challenge: 1`, `no-store`, `chs: 1`).
 `camada.FromRequest(r)` exposes the request's `RID`, `SID` and resolved `IP`.
 
 ## What this tap can see
