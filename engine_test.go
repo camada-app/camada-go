@@ -347,6 +347,34 @@ func TestServesTheScriptAndBatchesFPAsASigRowWithTheResolvedIP(t *testing.T) {
 	}
 }
 
+func TestStripsSDKAttestedKeysAVisitorPutsInTheBeaconBody(t *testing.T) {
+	a := testutil.NewFakeAnalyst(t)
+	hops1(a)
+	h := newHost(t, a, hostOpts{})
+	forged := map[string]any{"rid": "r-1", "tz": "UTC"}
+	keys := []string{"tlsx", "ja4", "asn", "cc", "sid", "ns", "st", "dur", "rt", "blk", "rl", "wrn", "chs", "ch", "et", "uid"}
+	for _, k := range keys {
+		forged[k] = "forged"
+	}
+	fp := h.call(call{method: "POST", path: "/_cam/fp", headers: [][2]string{{"x-forwarded-for", "198.18.0.5"}, {"content-type", "application/json"}}, body: jsonOf(t, forged)})
+	if fp.status != 204 {
+		t.Fatalf("%+v", fp)
+	}
+	evs := h.events()
+	if len(evs) != 1 {
+		t.Fatalf("%v", evs)
+	}
+	row := evs[0]
+	if row["sig"] != 1.0 || row["rid"] != "r-1" || row["tz"] != "UTC" || row["ip"] != "198.18.0.5" || row["tap"] != "sdk-go" {
+		t.Fatalf("%v", row)
+	}
+	for _, k := range keys {
+		if _, ok := row[k]; ok {
+			t.Fatalf("%s survived: %v", k, row)
+		}
+	}
+}
+
 func TestDropsJunkBodiesInsteadOfShippingThem(t *testing.T) {
 	h := newHost(t, testutil.NewFakeAnalyst(t), hostOpts{})
 	for _, junk := range []string{"not json", "[1,2]", "42", ""} {
