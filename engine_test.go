@@ -375,6 +375,26 @@ func TestStripsSDKAttestedKeysAVisitorPutsInTheBeaconBody(t *testing.T) {
 	}
 }
 
+func TestStampsTheRelayClockOnTheBeaconRowOverAForgedRts(t *testing.T) {
+	a := testutil.NewFakeAnalyst(t)
+	hops1(a)
+	h := newHost(t, a, hostOpts{})
+	before := time.Now().UnixMilli()
+	fp := h.call(call{method: "POST", path: "/_cam/fp", headers: [][2]string{{"x-forwarded-for", "198.18.0.5"}, {"content-type", "application/json"}}, body: `{"rid":"r-1","rts":1}`})
+	after := time.Now().UnixMilli()
+	if fp.status != 204 {
+		t.Fatalf("%+v", fp)
+	}
+	evs := h.events()
+	if len(evs) != 1 {
+		t.Fatalf("%v", evs)
+	}
+	rts, ok := evs[0]["rts"].(float64) // JSON numbers decode as float64
+	if !ok || rts != float64(int64(rts)) || rts < float64(before) || rts > float64(after) {
+		t.Fatalf("rts %v not in [%d, %d]", evs[0]["rts"], before, after)
+	}
+}
+
 func TestDropsJunkBodiesInsteadOfShippingThem(t *testing.T) {
 	h := newHost(t, testutil.NewFakeAnalyst(t), hostOpts{})
 	for _, junk := range []string{"not json", "[1,2]", "42", ""} {
