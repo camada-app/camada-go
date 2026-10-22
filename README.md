@@ -97,7 +97,7 @@ http.ListenAndServe(":8080", cam.Handler(mux))
    decided, `x-block-rule`; its event ships with `blk` (and `rl`). A `warn` rule passes and stamps
    `wrn`; a `skip` rule passes with nothing stamped. Cold (no snapshot yet) passes: fail open.
 4. Challenge: a `challenge` verdict gets the self-contained proof-of-work page (a non-HTML request
-   passes to the app with `x-camada-challenge: 1`, `cache-control: no-store` and a `chs: 1` event);
+   passes to the app with `x-camada-challenge: 1`, `no-store` on `cache-control` and the CDN cache headers, and a `chs: 1` event);
    `POST /__camada/challenge` verifies the solution, sets `_cch` (bound to the ip, one hour) and 302s back. A request whose ip cannot be resolved is never challenged. The page
    carries its own `Content-Security-Policy` (its inline solver and style by hash, nothing else)
    and replaces any policy a middleware already put on the response, so a strict site CSP cannot
