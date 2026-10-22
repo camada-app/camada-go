@@ -407,6 +407,9 @@ func (c *Camada) relayBeacon(body []byte, ip string) *Answer {
 	if err := json.Unmarshal(body, &parsed); err != nil || parsed == nil {
 		return answer
 	}
+	for _, k := range requestRowKeys {
+		delete(parsed, k)
+	}
 	parsed["sig"], parsed["tap"] = 1, TAP // ip and tap are the server's word, whatever the body claimed
 	parsed["ip"] = nil
 	if ip != "" {
