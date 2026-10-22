@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- fix: A signalled response (`x-camada-challenge: 1`) now also sets `cdn-cache-control`, `surrogate-control`, `cloudflare-cdn-cache-control`, `vercel-cdn-cache-control` and `netlify-cdn-cache-control` to `no-store`, overriding the app's. CDNs read those ahead of `cache-control`, so an app-set one could still let a shared cache keep the per-client copy. (camada-all-1zlg)
+- fix: a signalled response (`x-camada-challenge: 1`) now also sets `cdn-cache-control`, `surrogate-control`, `cloudflare-cdn-cache-control`, `vercel-cdn-cache-control` and `netlify-cdn-cache-control` to `no-store`, overriding the app's. CDNs read those ahead of `cache-control`, so an app-set one could still let a shared cache keep the per-client copy. (camada-all-1zlg)
 - feat: a non-HTML request (fetch/XHR/API) under a `challenge` row no longer gets a 403 JSON `challenge_required`: it passes to the app with `x-camada-challenge: 1` and `cache-control: no-store` (replacing the app's own), and its normal event ships with `chs: 1` even when the path is excluded or the request is sampled out. A page load still gets the challenge page. `ServeChallenge` returns false for a non-HTML request and signals it the same way. New `Ctx.Signalled`. (camada-all-7cgs)
 - fix (security): the first-party beacon relay (/_cam/fp) drops SDK-attested keys (tlsx, ja4, asn, cc, sid, ns, st, dur, rt, blk, rl, wrn, chs, ch, et, uid) from the visitor's body before queuing the sig:1 row, so a visitor cannot forge them; the analyst joins those from the request row. (camada-all-q617)
 
