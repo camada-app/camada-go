@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -241,7 +242,7 @@ func (s *statusRecorder) stamp() {
 }
 
 // noStoreHeaders: CDNs read their own cache header ahead of cache-control, so all of these end up no-store.
-var noStoreHeaders = [...]string{"Cache-Control", "CDN-Cache-Control", "Surrogate-Control", "Cloudflare-CDN-Cache-Control", "Vercel-CDN-Cache-Control", "Netlify-CDN-Cache-Control"}
+var noStoreHeaders = [...]string{"Cache-Control", "Cdn-Cache-Control", "Surrogate-Control", "Cloudflare-Cdn-Cache-Control", "Vercel-Cdn-Cache-Control", "Netlify-Cdn-Cache-Control"}
 
 // stampSignal marks a signalled (non-HTML, challenged) response: per client, so no-store replaces
 // whatever the app set, on every CDN cache header too.
@@ -249,16 +250,14 @@ func (s *statusRecorder) stampSignal() {
 	if s.ctx.Signalled() {
 		h := s.Header()
 		for k := range h {
-			for _, name := range noStoreHeaders {
-				if strings.EqualFold(k, name) {
-					delete(h, k) // a non-canonical key a middleware wrote straight into the map
-				}
+			if slices.Contains(noStoreHeaders[:], http.CanonicalHeaderKey(k)) {
+				delete(h, k) // also a non-canonical key a middleware wrote straight into the map
 			}
 		}
 		for _, name := range noStoreHeaders {
 			h.Set(name, "no-store")
 		}
-		s.Header().Set("X-Camada-Challenge", "1")
+		h.Set("X-Camada-Challenge", "1")
 	}
 }
 
