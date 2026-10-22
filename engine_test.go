@@ -789,7 +789,6 @@ func TestSignalledRequestStampedWhenTheHandlerNeverWrites(t *testing.T) {
 }
 
 func TestSignalledResponseOverridesEveryCDNCacheHeader(t *testing.T) {
-	names := []string{"Cache-Control", "CDN-Cache-Control", "Surrogate-Control", "Cloudflare-CDN-Cache-Control", "Vercel-CDN-Cache-Control", "Netlify-CDN-Cache-Control"}
 	h := newHost(t, v4(t), hostOpts{handler: func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("CDN-Cache-Control", "public, max-age=60")
 		w.Header()["surrogate-control"] = []string{"max-age=60"} // non-canonical key, as a middleware may write it
@@ -800,7 +799,7 @@ func TestSignalledResponseOverridesEveryCDNCacheHeader(t *testing.T) {
 	}})
 	for _, c := range []call{{path: "/challenge-me", headers: jsonFetch, peer: testutil.ChallengedIP}, {path: "/challenge-me/on-demand", headers: jsonFetch}} {
 		path, r := c.path, h.call(c)
-		for _, n := range names {
+		for _, n := range noStoreHeaders {
 			if got := r.headers.Values(n); !reflect.DeepEqual(got, []string{"no-store"}) {
 				t.Fatalf("%s %s: %v", path, n, got)
 			}
