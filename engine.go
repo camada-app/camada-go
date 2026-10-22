@@ -410,7 +410,7 @@ func (c *Camada) relayBeacon(body []byte, ip string) *Answer {
 	for _, k := range requestRowKeys {
 		delete(parsed, k)
 	}
-	parsed["sig"], parsed["tap"] = 1, TAP // ip and tap are the server's word, whatever the body claimed
+	parsed["sig"], parsed["tap"], parsed["rts"] = 1, TAP, c.NowMS() // ip, tap and rts are the server's word, whatever the body claimed
 	parsed["ip"] = nil
 	if ip != "" {
 		parsed["ip"] = ip
