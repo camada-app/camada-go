@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -716,20 +717,46 @@ func TestServeChallengeOnDemand(t *testing.T) {
 }
 
 func TestServeChallengeOnDemandSignalsANonHTMLRequest(t *testing.T) {
-	h := newHost(t, v4(t), hostOpts{handler: func(w http.ResponseWriter, r *http.Request) {
+	a := v4(t)
+	a.SetConfig("sample", 0) // the signalled event ships regardless
+	h := newHost(t, a, hostOpts{handler: func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "public")
 		if ServeChallenge(w, r) {
 			return
 		}
 		_, _ = w.Write([]byte("api json"))
 	}})
-	r := h.call(call{path: "/challenge-me", headers: jsonFetch, peer: testutil.ChallengedIP})
+	r := h.call(call{path: "/challenge-me", headers: jsonFetch})
 	if r.status != 200 || r.body != "api json" || r.header("x-camada-challenge") != "1" || r.header("cache-control") != "no-store" {
 		t.Fatalf("%+v", r)
 	}
 	evs := h.events()
 	if len(evs) != 1 || evs[0]["chs"] != 1.0 || evs[0]["st"] != 200.0 || evs[0]["blk"] != nil {
 		t.Fatalf("%v", evs)
+	}
+}
+
+func TestServeChallengeOnDemandSignalsWhenTheHandlerNeverWrites(t *testing.T) {
+	h := newHost(t, v4(t), hostOpts{handler: func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public")
+		ServeChallenge(w, r)
+	}})
+	r := h.call(call{path: "/challenge-me", headers: jsonFetch})
+	if r.status != 200 || r.header("x-camada-challenge") != "1" || !reflect.DeepEqual(r.headers.Values("Cache-Control"), []string{"no-store"}) {
+		t.Fatalf("%+v", r)
+	}
+	if evs := h.events(); len(evs) != 1 || evs[0]["chs"] != 1.0 {
+		t.Fatalf("%v", evs)
+	}
+}
+
+func TestSignalledRequestStampedWhenTheHandlerNeverWrites(t *testing.T) {
+	h := newHost(t, v4(t), hostOpts{handler: func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public")
+	}})
+	r := h.call(call{path: "/challenge-me", headers: jsonFetch, peer: testutil.ChallengedIP})
+	if r.status != 200 || r.header("x-camada-challenge") != "1" || !reflect.DeepEqual(r.headers.Values("Cache-Control"), []string{"no-store"}) {
+		t.Fatalf("%+v", r)
 	}
 }
 

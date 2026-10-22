@@ -206,6 +206,9 @@ func (h *handler) run(w http.ResponseWriter, r *http.Request, p *Passed) {
 			finish(http.StatusInternalServerError) // the app panicked: net/http will answer 500 (or drop the connection)
 			panic(err)
 		}
+		if !rec.wrote {
+			rec.stampSignal() // the app never wrote: net/http's implicit 200 still carries the signal
+		}
 		finish(rec.status)
 	}()
 	h.next.ServeHTTP(rec, r)
@@ -237,16 +240,22 @@ func (s *statusRecorder) stamp() {
 	}
 }
 
+// stampSignal marks a signalled (non-HTML, challenged) response: per client, so no-store replaces
+// whatever the app set.
+func (s *statusRecorder) stampSignal() {
+	if s.ctx.Signalled() {
+		s.Header().Set("Cache-Control", "no-store")
+		s.Header().Set("X-Camada-Challenge", "1")
+	}
+}
+
 func (s *statusRecorder) WriteHeader(code int) {
 	// an informational 1xx (103 Early Hints) is not the answer: the final status still follows
 	if !s.wrote && (code >= 200 || code == http.StatusSwitchingProtocols) {
 		s.wrote = true
 		s.status = code
 		s.stamp()
-		if s.ctx.Signalled() { // read now: ServeChallenge may have flagged it from inside the app
-			s.Header().Set("Cache-Control", "no-store") // per client: replaces whatever the app set
-			s.Header().Set("X-Camada-Challenge", "1")
-		}
+		s.stampSignal() // read now: ServeChallenge may have flagged it from inside the app
 		if code == http.StatusSwitchingProtocols && s.Header().Get("X-Rid") == s.rid {
 			s.Header().Del("X-Rid") // never on a 101 (a websocket handshake): the rid stays with the event
 		}
