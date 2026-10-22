@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- feat: a non-HTML request (fetch/XHR/API) under a `challenge` row no longer gets a 403 JSON `challenge_required`: it passes to the app with `x-camada-challenge: 1` and `cache-control: no-store` (replacing the app's own), and its normal event ships with `chs: 1` even when the path is excluded or the request is sampled out. A page load still gets the challenge page. `ServeChallenge` returns false for a non-HTML request and signals it the same way. New `Ctx.Signalled`. (camada-all-7cgs)
+
 ## 0.1.5 (2026-10-19)
 
 - fix (security): a custom-rule `matches` regex never runs on a ua, header or path value over 2048 chars (UTF-16 units): over-cap fails closed, a hit for block/challenge/warn and a miss for skip/allow, never truncated (truncation would fail a deny rule open). (camada-all-q980)

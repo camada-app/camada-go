@@ -94,7 +94,12 @@ type Ctx struct {
 	req        *Req
 	engine     *Camada
 	challenged atomic.Bool
+	signalled  atomic.Bool // a non-HTML request passed under a challenge: x-camada-challenge header and `chs: 1` on its event
 }
+
+// Signalled reports whether the response must carry x-camada-challenge and no-store. Adapters read it
+// when the response headers are written, since ServeChallenge can set it from inside the app.
+func (x *Ctx) Signalled() bool { return x != nil && x.signalled.Load() }
 
 // Passed: run the app. RID/SetCookie ride the response; Ctx is stored on the host request;
 // OnFinish(status) is called once at the end. The inert Passed has every field zero.
@@ -293,14 +298,19 @@ func (c *Camada) decideRequest(req *Req, body []byte) (*Answer, *Passed) {
 	// A challenge needs a resolved client IP: the nonce and the _cch cookie are bound to it,
 	// so without one a single solve would mint a cookie every unidentified client could
 	// present. No ip -> no challenge (fail open), the same stance ip rules take.
+	signalled := false
 	if c.challengeOn && ip != "" {
 		// The verify endpoint answers first: a challenged client must be able to reach it.
 		if req.Method == "POST" && req.Path == c.ChallengePath {
 			return c.verify(req, body, ip), nil
 		}
 		if v.Challenge && !c.challengePassed(req, ip) {
-			sid, _ := cookieValue(req.header("cookie"), SessionCookie)
-			return c.serveChallenge(req, ip, sid), nil
+			// A page load gets the challenge; anything else (fetch/XHR/API) passes to the app, flagged.
+			if challenge.WantsHTML(req.header("accept"), req.header("sec-fetch-dest")) {
+				sid, _ := cookieValue(req.header("cookie"), SessionCookie)
+				return c.serveChallenge(req, ip, sid), nil
+			}
+			signalled = true
 		}
 	}
 
@@ -325,6 +335,7 @@ func (c *Camada) decideRequest(req *Req, body []byte) (*Answer, *Passed) {
 		}
 	}
 	ctx := &Ctx{RID: rid, SID: sid, IP: ip, req: req, engine: c}
+	ctx.signalled.Store(signalled)
 
 	cfg := c.Snap.Config()
 	excluded := false
@@ -353,7 +364,12 @@ func (c *Camada) decideRequest(req *Req, body []byte) (*Answer, *Passed) {
 		}()
 		// ServeChallenge may have answered from inside the app, and it already shipped the
 		// `blk: "challenge"` row — one request, one event.
-		if ctx.challenged.Load() || excluded || !sampled {
+		if ctx.challenged.Load() {
+			return
+		}
+		// A signalled request ships regardless of sample and exclude, like the 403 row it replaces.
+		signalled := ctx.signalled.Load()
+		if !signalled && (excluded || !sampled) {
 			return
 		}
 		ev := c.event(req, rid, sid, newSession, ip)
@@ -364,6 +380,9 @@ func (c *Camada) decideRequest(req *Req, body []byte) (*Answer, *Passed) {
 		}
 		if warnRule != "" {
 			ev["wrn"] = warnRule // §D3: the warn rule that let this request through
+		}
+		if signalled {
+			ev["chs"] = 1 // challenge signalled (camada-all-82ar)
 		}
 		c.Queue.Push(ev)
 	}
@@ -425,17 +444,10 @@ func (c *Camada) page(ip, to string) *Answer {
 	return &Answer{403, headers, []byte(html)}
 }
 
-// serveChallenge: 403 + the proof-of-work page (HTML navigations) or 403 JSON (everything
-// else), plus the `blk: "challenge"` event — a served challenge is reported like a block (contract §D2).
+// serveChallenge: 403 + the proof-of-work page (HTML navigations only), plus the `blk: "challenge"` event — a served challenge is reported like a block (contract §D2).
 func (c *Camada) serveChallenge(req *Req, ip, sid string) *Answer {
 	to := challenge.SafeReturnTo(req.Path + req.Query)
-	var answer *Answer
-	if challenge.WantsHTML(req.header("accept"), req.header("sec-fetch-dest")) {
-		answer = c.page(ip, to)
-	} else {
-		headers := []Header{hdr("content-type", "application/json"), hdr("cache-control", "no-store"), hdr("x-camada-challenge", "1")}
-		answer = &Answer{403, headers, []byte(`{"error":"challenge_required"}`)}
-	}
+	answer := c.page(ip, to)
 	func() {
 		defer func() {
 			if r := recover(); r != nil { // the response is decided; telemetry must never undo that
@@ -473,7 +485,8 @@ func (c *Camada) verify(req *Req, body []byte, ip string) *Answer {
 
 // ServeChallenge serves the challenge for this request on demand — for a route the app wants
 // to gate itself. nil when the client already holds a valid _cch (render your own page), or
-// when the client cannot be identified (fail open).
+// when the client cannot be identified (fail open). A non-HTML request is never challenged: it is
+// signalled (header and `chs: 1` event) and nil is returned, so the app answers.
 func (c *Camada) ServeChallenge(ctx *Ctx) (a *Answer) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -482,6 +495,10 @@ func (c *Camada) ServeChallenge(ctx *Ctx) (a *Answer) {
 		}
 	}()
 	if c.Disabled() || c.Kit == nil || ctx == nil || ctx.req == nil || ctx.IP == "" || c.challengePassed(ctx.req, ctx.IP) {
+		return nil
+	}
+	if !challenge.WantsHTML(ctx.req.header("accept"), ctx.req.header("sec-fetch-dest")) {
+		ctx.signalled.Store(true)
 		return nil
 	}
 	ctx.challenged.Store(true)
