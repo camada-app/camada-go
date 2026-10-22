@@ -52,9 +52,10 @@ func Track(r *http.Request, event, user string) {
 	engineFor(ctx).Track(ctx, event, user)
 }
 
-// ServeChallenge writes the proof-of-work page (or 403 JSON) for a route you gate yourself
-// and reports true; false — write your own response — once the browser holds a valid _cch,
-// or when the client cannot be identified (fail open).
+// ServeChallenge writes the proof-of-work page for a route you gate yourself and reports true;
+// false — write your own response — once the browser holds a valid _cch, when the client cannot
+// be identified (fail open), or when the request is not a page load (it is signalled instead:
+// x-camada-challenge: 1, no-store, and a `chs: 1` event).
 func ServeChallenge(w http.ResponseWriter, r *http.Request) bool {
 	ctx := FromRequest(r)
 	a := engineFor(ctx).ServeChallenge(ctx)
@@ -187,7 +188,7 @@ func (h *handler) run(w http.ResponseWriter, r *http.Request, p *Passed) {
 	if p.Ctx != nil {
 		r = r.WithContext(context.WithValue(r.Context(), ctxKey{}, p.Ctx))
 	}
-	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK, rid: p.RID, cookie: p.SetCookie}
+	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK, rid: p.RID, cookie: p.SetCookie, ctx: p.Ctx}
 	rec.stamp() // before the app: a handler that never writes still answers with them
 	finished := false
 	finish := func(status int) {
@@ -218,6 +219,7 @@ type statusRecorder struct {
 	wrote  bool
 	rid    string
 	cookie string
+	ctx    *Ctx
 }
 
 func (s *statusRecorder) stamp() {
@@ -241,6 +243,10 @@ func (s *statusRecorder) WriteHeader(code int) {
 		s.wrote = true
 		s.status = code
 		s.stamp()
+		if s.ctx.Signalled() { // read now: ServeChallenge may have flagged it from inside the app
+			s.Header().Set("Cache-Control", "no-store") // per client: replaces whatever the app set
+			s.Header().Set("X-Camada-Challenge", "1")
+		}
 		if code == http.StatusSwitchingProtocols && s.Header().Get("X-Rid") == s.rid {
 			s.Header().Del("X-Rid") // never on a 101 (a websocket handshake): the rid stays with the event
 		}

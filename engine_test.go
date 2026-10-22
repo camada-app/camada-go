@@ -508,15 +508,59 @@ func TestServesThePageForAnHTMLNavigationAndShipsBlkChallenge(t *testing.T) {
 	}
 }
 
-func TestAnswersJSONForANonHTMLRequest(t *testing.T) {
-	h := newHost(t, v4(t), hostOpts{})
-	r := h.call(call{path: "/api", headers: [][2]string{{"accept", "application/json"}}, peer: testutil.ChallengedIP})
-	if r.status != 403 || r.header("content-type") != "application/json" || r.body != `{"error":"challenge_required"}` {
+var jsonFetch = [][2]string{{"accept", "application/json"}}
+
+func appCaching(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "public, max-age=600")
+	_, _ = w.Write([]byte("app body"))
+}
+
+func TestSignalsANonHTMLRequestUnderAChallengeAndPassesItToTheApp(t *testing.T) {
+	h := newHost(t, v4(t), hostOpts{handler: appCaching})
+	r := h.call(call{path: "/api", headers: jsonFetch, peer: testutil.ChallengedIP})
+	if r.status != 200 || r.body != "app body" || len(h.seen) != 1 {
 		t.Fatalf("%+v", r)
 	}
-	r2 := h.call(call{path: "/api", headers: [][2]string{{"accept", "text/html"}, {"sec-fetch-dest", "empty"}}, peer: testutil.ChallengedIP})
-	if r2.header("content-type") != "application/json" {
-		t.Fatal("a fetch got the page")
+	if r.header("x-camada-challenge") != "1" || r.headers.Values("Cache-Control")[0] != "no-store" || len(r.headers.Values("Cache-Control")) != 1 || r.header("x-rid") == "" {
+		t.Fatalf("%v", r.headers)
+	}
+	ev := h.events()[0]
+	if ev["chs"] != 1.0 || ev["st"] != 200.0 || ev["dur"] == nil || ev["blk"] != nil {
+		t.Fatalf("%v", ev)
+	}
+	// a fetch that asks for text/html is still not a page load
+	if r2 := h.call(call{path: "/api", headers: [][2]string{{"accept", "text/html"}, {"sec-fetch-dest", "empty"}}, peer: testutil.ChallengedIP}); r2.status != 200 || r2.header("x-camada-challenge") != "1" {
+		t.Fatalf("a fetch got the page: %+v", r2)
+	}
+}
+
+func TestSignalledEventShipsEvenWhenExcludedOrSampledOut(t *testing.T) {
+	a := v4(t)
+	a.SetConfig("exclude", []string{"/api"})
+	a.SetConfig("sample", 0)
+	h := newHost(t, a, hostOpts{})
+	if r := h.call(call{path: "/api/x", headers: jsonFetch, peer: testutil.ChallengedIP}); r.status != 200 || r.header("x-camada-challenge") != "1" {
+		t.Fatalf("%+v", r)
+	}
+	evs := h.events()
+	if len(evs) != 1 || evs[0]["chs"] != 1.0 || evs[0]["st"] != 200.0 {
+		t.Fatalf("%v", evs)
+	}
+}
+
+func TestValidCchMeansNoSignal(t *testing.T) {
+	h := newHost(t, v4(t), hostOpts{})
+	nonce := nonceOf(t, h.call(call{path: "/", headers: htmlNav, peer: testutil.ChallengedIP}).body)
+	ok := h.call(call{method: "POST", path: "/__camada/challenge", body: "nonce=" + nonce + "&solution=" + testutil.Solve(nonce) + "&to=%2F", peer: testutil.ChallengedIP})
+	hdrs := append(append([][2]string{}, jsonFetch...), [2]string{"cookie", cookiePair(ok.header("set-cookie"))})
+	r := h.call(call{path: "/api", headers: hdrs, peer: testutil.ChallengedIP})
+	if r.status != 200 || r.header("x-camada-challenge") != "" {
+		t.Fatalf("%+v", r)
+	}
+	for _, ev := range h.events() {
+		if ev["p"] == "/api" && ev["chs"] != nil {
+			t.Fatalf("%v", ev)
+		}
 	}
 }
 
@@ -668,6 +712,24 @@ func TestServeChallengeOnDemand(t *testing.T) {
 	pair := cookiePair(ok.header("set-cookie"))
 	if h.call(call{path: "/challenge-me", headers: append(htmlNav, [2]string{"cookie", pair})}).body != "secret page" {
 		t.Fatal("holder still challenged")
+	}
+}
+
+func TestServeChallengeOnDemandSignalsANonHTMLRequest(t *testing.T) {
+	h := newHost(t, v4(t), hostOpts{handler: func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public")
+		if ServeChallenge(w, r) {
+			return
+		}
+		_, _ = w.Write([]byte("api json"))
+	}})
+	r := h.call(call{path: "/challenge-me", headers: jsonFetch, peer: testutil.ChallengedIP})
+	if r.status != 200 || r.body != "api json" || r.header("x-camada-challenge") != "1" || r.header("cache-control") != "no-store" {
+		t.Fatalf("%+v", r)
+	}
+	evs := h.events()
+	if len(evs) != 1 || evs[0]["chs"] != 1.0 || evs[0]["st"] != 200.0 || evs[0]["blk"] != nil {
+		t.Fatalf("%v", evs)
 	}
 }
 
