@@ -52,9 +52,10 @@ func Track(r *http.Request, event, user string) {
 	engineFor(ctx).Track(ctx, event, user)
 }
 
-// ServeChallenge writes the proof-of-work page (or 403 JSON) for a route you gate yourself
-// and reports true; false — write your own response — once the browser holds a valid _cch,
-// or when the client cannot be identified (fail open).
+// ServeChallenge writes the proof-of-work page for a route you gate yourself and reports true;
+// false — write your own response — once the browser holds a valid _cch, when the client cannot
+// be identified (fail open), or when the request is not a page load (it is signalled instead:
+// x-camada-challenge: 1, no-store, and a `chs: 1` event).
 func ServeChallenge(w http.ResponseWriter, r *http.Request) bool {
 	ctx := FromRequest(r)
 	a := engineFor(ctx).ServeChallenge(ctx)
@@ -187,7 +188,7 @@ func (h *handler) run(w http.ResponseWriter, r *http.Request, p *Passed) {
 	if p.Ctx != nil {
 		r = r.WithContext(context.WithValue(r.Context(), ctxKey{}, p.Ctx))
 	}
-	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK, rid: p.RID, cookie: p.SetCookie}
+	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK, rid: p.RID, cookie: p.SetCookie, ctx: p.Ctx}
 	rec.stamp() // before the app: a handler that never writes still answers with them
 	finished := false
 	finish := func(status int) {
@@ -205,6 +206,9 @@ func (h *handler) run(w http.ResponseWriter, r *http.Request, p *Passed) {
 			finish(http.StatusInternalServerError) // the app panicked: net/http will answer 500 (or drop the connection)
 			panic(err)
 		}
+		if !rec.wrote {
+			rec.stampSignal() // the app never wrote: net/http's implicit 200 still carries the signal
+		}
 		finish(rec.status)
 	}()
 	h.next.ServeHTTP(rec, r)
@@ -218,6 +222,7 @@ type statusRecorder struct {
 	wrote  bool
 	rid    string
 	cookie string
+	ctx    *Ctx
 }
 
 func (s *statusRecorder) stamp() {
@@ -235,12 +240,22 @@ func (s *statusRecorder) stamp() {
 	}
 }
 
+// stampSignal marks a signalled (non-HTML, challenged) response: per client, so no-store replaces
+// whatever the app set.
+func (s *statusRecorder) stampSignal() {
+	if s.ctx.Signalled() {
+		s.Header().Set("Cache-Control", "no-store")
+		s.Header().Set("X-Camada-Challenge", "1")
+	}
+}
+
 func (s *statusRecorder) WriteHeader(code int) {
 	// an informational 1xx (103 Early Hints) is not the answer: the final status still follows
 	if !s.wrote && (code >= 200 || code == http.StatusSwitchingProtocols) {
 		s.wrote = true
 		s.status = code
 		s.stamp()
+		s.stampSignal() // read now: ServeChallenge may have flagged it from inside the app
 		if code == http.StatusSwitchingProtocols && s.Header().Get("X-Rid") == s.rid {
 			s.Header().Del("X-Rid") // never on a 101 (a websocket handshake): the rid stays with the event
 		}
