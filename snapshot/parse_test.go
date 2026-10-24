@@ -398,7 +398,8 @@ func TestQuantifierBoundsAboveRE2CapAreDropped(t *testing.T) {
 		{`^a{2,5000}$`, "a", false},
 		{`^a{3}$`, "aaa", true},
 		{`^a{,5000}$`, "a{,5000}", true}, // not a quantifier in JS: literal
-		{`^[a{1,5000}]+$`, "a{", true},   // inside a class: untouched
+		{`^[a{1,5000}]+$`, "5", true},    // inside a class: untouched
+		{`^a{1000,5000}$`, strings.Repeat("a", 1000), true},
 		{`^a\{1,5000\}$`, "a{1,5000}", true},
 	} {
 		rx := CompileRegex(c.pat)
@@ -407,7 +408,7 @@ func TestQuantifierBoundsAboveRE2CapAreDropped(t *testing.T) {
 		}
 	}
 	// no exact RE2 spelling: rejected, the rule fails open
-	for _, pat := range []string{`^a{1,1500}$`, `^a{1500}$`, `^a{1500,}$`, `^a{1500,5000}$`} {
+	for _, pat := range []string{`^a{1,1500}$`, `^a{1500}$`, `^a{1500,}$`, `^a{1500,5000}$`, `^a{1,2047}$`, `^a{1001,5000}$`} {
 		if CompileRegex(pat) != nil {
 			t.Errorf("%s compiled", pat)
 		}
