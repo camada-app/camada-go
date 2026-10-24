@@ -433,3 +433,30 @@ func TestQuantifiedAssertionFailsOpenAsJSThrows(t *testing.T) {
 		}
 	}
 }
+
+func TestLeadingZeroCountReadsAsJS(t *testing.T) {
+	for _, c := range []struct {
+		pat, in string
+		want    bool
+	}{
+		{`^a{02}$`, "aa", true}, {`^a{02}$`, "a{02}", false},
+		{`^a{0,03}$`, "aaa", true},
+		{`^a{00}b$`, "b", true},
+		{`^a{02,}$`, "aaa", true},
+		{`^[{02}]+$`, "{02}", true},
+		{`^a\{02}$`, "a{02}", true},
+	} {
+		re := CompileRegex(c.pat)
+		if re == nil {
+			t.Fatalf("%s: did not compile", c.pat)
+		}
+		if got := re.MatchString(c.in); got != c.want {
+			t.Errorf("%s on %q = %v, want %v", c.pat, c.in, got, c.want)
+		}
+	}
+	for _, p := range []string{`a{01001}`, `a{0,01001}`} {
+		if CompileRegex(p) != nil {
+			t.Errorf("%s compiled, want nil", p)
+		}
+	}
+}
