@@ -90,21 +90,6 @@ func loadRegexLimit(t *testing.T) rlVectors {
 	return v
 }
 
-// ruleMatcher builds the rule into a v5 snapshot (blk5/v5-empty) and returns the public matcher.
-func ruleMatcher(t *testing.T, rule Rule) *Matcher {
-	t.Helper()
-	meta, err := DecodeMeta(testutil.ReadBin(t, "blk5/v5-empty.meta.json"))
-	if err != nil {
-		t.Fatalf("meta: %v", err)
-	}
-	meta.Rules = []Rule{rule}
-	snap, err := ParseSnapshot(testutil.ReadBin(t, "blk5/v5-empty.bin"), meta)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	return NewMatcher(snap)
-}
-
 func (i rlInput) match(m *Matcher) MatchResult {
 	return m.Match(MatchInput{IP: i.IP, Path: i.Path.s, UA: i.UA.s})
 }
@@ -120,7 +105,7 @@ func TestRegexLimitVectors(t *testing.T) {
 
 	t.Run("over_limit", func(t *testing.T) {
 		for _, r := range v.OverLimit {
-			if got := r.Input.match(ruleMatcher(t, r.Rule)).Rule == r.Rule.ID; got != r.Hit["linear"] {
+			if got := r.Input.match(rulesSnapshot(t, []Rule{r.Rule}, nil)).Rule == r.Rule.ID; got != r.Hit["linear"] {
 				t.Errorf("%s: hit %v want %v", r.ID, got, r.Hit["linear"])
 			}
 		}
@@ -132,7 +117,7 @@ func TestRegexLimitVectors(t *testing.T) {
 			var got bool
 			for n := 0; n < 3; n++ {
 				start := time.Now()
-				m := ruleMatcher(t, r.Rule)
+				m := rulesSnapshot(t, []Rule{r.Rule}, nil)
 				got = r.Input.match(m).Rule == r.Rule.ID
 				if d := time.Since(start); d < best {
 					best = d
@@ -151,7 +136,7 @@ func TestRegexLimitVectors(t *testing.T) {
 		for _, r := range v.Refused {
 			rule := Rule{ID: v.RefusedRule.ID, Action: v.RefusedRule.Action,
 				Conds: []Cond{{F: v.RefusedRule.Field, Op: "matches", V: r.Pattern}}}
-			m := ruleMatcher(t, rule) // an uncompilable pattern must not fail the parse
+			m := rulesSnapshot(t, []Rule{rule}, nil) // an uncompilable pattern must not fail the parse
 			for _, c := range r.Cases {
 				in := rlInput{IP: "8.8.8.8", UA: c.UA}
 				if got := in.match(m).Rule == rule.ID; got != c.Hit["go"] {
