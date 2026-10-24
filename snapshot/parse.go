@@ -257,7 +257,9 @@ func CompileRegex(pattern string) *regexp.Regexp {
 
 // jsToRE2 translates the JS-only spellings a tenant is likely to author: `[^]` (any char) ->
 // `[\s\S]`, `\cX` -> the control character, `\uXXXX` -> `\x{XXXX}` (RE2's code-point escape;
-// Python's re reads `\uXXXX` natively, so the family agrees). Anything else RE2 rejects still fails open.
+// Python's re reads `\uXXXX` natively, so the family agrees), and a quantifier bound above RE2's
+// 1000 cap (`{1,5000}`) -> a lower bound clamped to 1000, an upper bound dropped; that is exact
+// for the 2048-unit match inputs. Anything else RE2 rejects still fails open.
 func jsToRE2(pattern string) string {
 	var out strings.Builder
 	n, inClass := len(pattern), false
@@ -288,11 +290,56 @@ func jsToRE2(pattern string) string {
 				continue
 			}
 			inClass = true
+		} else if ch == '{' {
+			if q, w := clampQuantifier(pattern[i:]); w > 0 {
+				out.WriteString(q)
+				i += w
+				continue
+			}
 		}
 		out.WriteByte(ch)
 		i++
 	}
 	return out.String()
+}
+
+// maxRepeat is RE2's repeat-count limit.
+const maxRepeat = 1000
+
+// clampQuantifier reads a `{n}`, `{n,}` or `{n,m}` at the start of s and returns its RE2 spelling
+// and byte width; width 0 means s does not start with a quantifier (a literal `{`).
+func clampQuantifier(s string) (string, int) {
+	end := strings.IndexByte(s, '}')
+	if end < 0 {
+		return "", 0
+	}
+	lo, hi, comma := s[1:end], "", false
+	if c := strings.IndexByte(lo, ','); c >= 0 {
+		lo, hi, comma = lo[:c], lo[c+1:], true
+	}
+	if !isDigits(lo) || comma && hi != "" && !isDigits(hi) {
+		return "", 0
+	}
+	over := func(d string) bool { return len(d) > 4 || len(d) == 4 && d > "1000" }
+	if over(lo) {
+		return "{1000,}", end + 1
+	}
+	if over(hi) {
+		hi = ""
+	}
+	if !comma {
+		return s[:end+1], end + 1
+	}
+	return "{" + lo + "," + hi + "}", end + 1
+}
+
+func isDigits(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return s != ""
 }
 
 func isASCIILetter(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
