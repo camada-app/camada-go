@@ -414,3 +414,22 @@ func TestQuantifierBoundsAboveRE2CapAreDropped(t *testing.T) {
 		}
 	}
 }
+
+func TestQuantifiedAssertionFailsOpenAsJSThrows(t *testing.T) {
+	for _, pat := range []string{`^*`, `^+`, `^?`, `^{1,5}`, `^{1,5000}`, `a$*`, `\b+`, `\B{2}`, `x\b?`} {
+		if CompileRegex(pat) != nil {
+			t.Errorf("%s compiled", pat)
+		}
+	}
+	for _, c := range []struct{ pat, in string }{
+		{`^{,5}`, "{,5}"}, // not a quantifier in JS: literal
+		{`^[$*]+$`, "$*"}, // inside a class
+		{`^a\$*$`, "a$$"}, // escaped $ is a literal
+		{`(^)*a`, "a"},    // a group is quantifiable
+		{`\ba+\b`, "aa"},
+	} {
+		if rx := CompileRegex(c.pat); rx == nil || !rx.MatchString(c.in) {
+			t.Errorf("%s on %q: want match", c.pat, c.in)
+		}
+	}
+}

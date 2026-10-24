@@ -248,7 +248,11 @@ func InRange6(r Bits, n int, w Words) bool {
 // backreferences) is nil and never matches — fail open, never throw. The JS spellings RE2 refuses
 // are translated first (jsToRE2); \d \w \b are ASCII in RE2 as JS reads them, and (?<name> is native.
 func CompileRegex(pattern string) *regexp.Regexp {
-	rx, err := regexp.Compile(jsToRE2(pattern))
+	re2, ok := jsToRE2(pattern)
+	if !ok {
+		return nil
+	}
+	rx, err := regexp.Compile(re2)
 	if err != nil {
 		return nil
 	}
@@ -259,14 +263,20 @@ func CompileRegex(pattern string) *regexp.Regexp {
 // `[\s\S]`, `\cX` -> the control character, `\uXXXX` -> `\x{XXXX}` (RE2's code-point escape;
 // Python's re reads `\uXXXX` natively, so the family agrees), and a quantifier bound above RE2's
 // 1000 cap (`{1,5000}`) -> the upper bound dropped when it is past MaxMatchInput, which is exact for
-// capped inputs. Anything else RE2 rejects still fails open.
-func jsToRE2(pattern string) string {
+// capped inputs. Anything else RE2 rejects still fails open. ok is false for a quantifier right after
+// ^ $ \b \B: JS throws on it, RE2 would accept it (`^{1,5000}` would even clamp to a bare `^`).
+func jsToRE2(pattern string) (string, bool) {
 	var out strings.Builder
-	n, inClass := len(pattern), false
+	n, inClass, assertion := len(pattern), false, false
 	for i := 0; i < n; {
 		ch := pattern[i]
+		if assertion && !inClass && isQuantifierAt(pattern[i:]) {
+			return "", false
+		}
+		assertion = false
 		if ch == '\\' && i+1 < n {
 			nxt := pattern[i+1]
+			assertion = !inClass && (nxt == 'b' || nxt == 'B')
 			if nxt == 'c' && i+2 < n && isASCIILetter(pattern[i+2]) {
 				out.WriteString(regexp.QuoteMeta(string(rune(pattern[i+2]&^0x20) - 64)))
 				i += 3
@@ -283,6 +293,8 @@ func jsToRE2(pattern string) string {
 		}
 		if inClass {
 			inClass = ch != ']'
+		} else if ch == '^' || ch == '$' {
+			assertion = true
 		} else if ch == '[' {
 			if strings.HasPrefix(pattern[i:], "[^]") {
 				out.WriteString(`[\s\S]`)
@@ -300,7 +312,23 @@ func jsToRE2(pattern string) string {
 		out.WriteByte(ch)
 		i++
 	}
-	return out.String()
+	return out.String(), true
+}
+
+// isQuantifierAt reports whether s starts with `*`, `+`, `?` or a `{n}`, `{n,}`, `{n,m}` quantifier.
+func isQuantifierAt(s string) bool {
+	if s[0] == '*' || s[0] == '+' || s[0] == '?' {
+		return true
+	}
+	if s[0] != '{' {
+		return false
+	}
+	end := strings.IndexByte(s, '}')
+	if end < 0 {
+		return false
+	}
+	lo, hi, _ := strings.Cut(s[1:end], ",")
+	return isDigits(lo) && (hi == "" || isDigits(hi))
 }
 
 // maxRepeat is RE2's repeat-count limit.
