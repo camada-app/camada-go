@@ -353,23 +353,18 @@ func clampQuantifier(s string) (string, int) {
 	if !isDigits(lo) || comma && hi != "" && !isDigits(hi) {
 		return "", 0
 	}
-	norm := "{" + trimZeros(lo) + "}"
+	if comma && hi != "" && boundValue(hi) >= MaxMatchInput && boundValue(lo) <= maxRepeat {
+		return "{" + strconv.Itoa(boundValue(lo)) + ",}", end + 1
+	}
+	norm := "{" + trimZeros(lo)
 	if comma {
-		norm = "{" + trimZeros(lo) + "," + trimZeros(hi) + "}"
+		norm += "," + trimZeros(hi)
 	}
-	respell := func() (string, int) { // the zero-trimmed brace, or leave s alone when already canonical
-		if norm != s[:end+1] {
-			return norm, end + 1
-		}
-		return "", 0
+	norm += "}"
+	if norm != s[:end+1] {
+		return norm, end + 1
 	}
-	if !comma || hi == "" || boundValue(hi) <= maxRepeat {
-		return respell()
-	}
-	if boundValue(hi) < MaxMatchInput || boundValue(lo) > maxRepeat {
-		return respell()
-	}
-	return "{" + strconv.Itoa(boundValue(lo)) + ",}", end + 1
+	return "", 0
 }
 
 // trimZeros drops leading zeros from a digit string, keeping at least one digit.
