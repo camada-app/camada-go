@@ -224,9 +224,12 @@ func indexFrom(s string, c byte, from int) int {
 // pathHit: deny (block/challenge/warn) = any spelling; exemption (allow/skip) = both canonical forms.
 func pathHit(pred func(string) bool, forms *[3]string, deny bool) bool {
 	if deny {
-		return pred(forms[0]) || pred(forms[1]) || pred(forms[2])
+		// a form equal to one already tried cannot change the answer, so it is not matched again
+		return pred(forms[0]) ||
+			forms[1] != forms[0] && pred(forms[1]) ||
+			forms[2] != forms[0] && forms[2] != forms[1] && pred(forms[2])
 	}
-	return pred(forms[1]) && pred(forms[2])
+	return pred(forms[1]) && (forms[2] == forms[1] || pred(forms[2]))
 }
 
 // compilePathRegex: a path regex runs case-insensitively.
