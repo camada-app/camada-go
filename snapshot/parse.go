@@ -257,7 +257,9 @@ func CompileRegex(pattern string) *regexp.Regexp {
 
 // jsToRE2 translates the JS-only spellings a tenant is likely to author: `[^]` (any char) ->
 // `[\s\S]`, `\cX` -> the control character, `\uXXXX` -> `\x{XXXX}` (RE2's code-point escape;
-// Python's re reads `\uXXXX` natively, so the family agrees). Anything else RE2 rejects still fails open.
+// Python's re reads `\uXXXX` natively, so the family agrees), and a quantifier bound above RE2's
+// 1000 cap (`{1,5000}`) -> the upper bound dropped when it is past MaxMatchInput, which is exact for
+// capped inputs. Anything else RE2 rejects still fails open.
 func jsToRE2(pattern string) string {
 	var out strings.Builder
 	n, inClass := len(pattern), false
@@ -288,11 +290,65 @@ func jsToRE2(pattern string) string {
 				continue
 			}
 			inClass = true
+		} else if ch == '{' {
+			if q, w := clampQuantifier(pattern[i:]); w > 0 {
+				out.WriteString(q)
+				i += w
+				continue
+			}
 		}
 		out.WriteByte(ch)
 		i++
 	}
 	return out.String()
+}
+
+// maxRepeat is RE2's repeat-count limit.
+const maxRepeat = 1000
+
+// clampQuantifier reads a `{n}`, `{n,}` or `{n,m}` at the start of s and returns its RE2 spelling
+// and byte width; width 0 means "leave s alone" (a literal `{`, or a bound that has no exact RE2
+// spelling, which RE2 then rejects and the rule fails open). Only an upper bound at or past
+// MaxMatchInput is dropped (and only with a lower bound RE2 accepts): no capped input can reach
+// it, so dropping it is exact. A bound between 1001 and MaxMatchInput, or a lower bound past 1000,
+// has no exact spelling, so it is left for RE2 to reject.
+func clampQuantifier(s string) (string, int) {
+	end := strings.IndexByte(s, '}')
+	if end < 0 {
+		return "", 0
+	}
+	lo, hi, comma := s[1:end], "", false
+	if c := strings.IndexByte(lo, ','); c >= 0 {
+		lo, hi, comma = lo[:c], lo[c+1:], true
+	}
+	if !isDigits(lo) || comma && hi != "" && !isDigits(hi) {
+		return "", 0
+	}
+	if !comma || hi == "" || boundValue(hi) <= maxRepeat {
+		return "", 0
+	}
+	if boundValue(hi) < MaxMatchInput || boundValue(lo) > maxRepeat {
+		return "", 0
+	}
+	return "{" + strconv.Itoa(boundValue(lo)) + ",}", end + 1
+}
+
+// boundValue is a digit string's value, saturated so a huge bound cannot overflow.
+func boundValue(d string) int {
+	n := 0
+	for i := 0; i < len(d) && n < 1<<20; i++ {
+		n = n*10 + int(d[i]-'0')
+	}
+	return n
+}
+
+func isDigits(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return s != ""
 }
 
 func isASCIILetter(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
