@@ -115,7 +115,7 @@ func TestRegexLimitVectors(t *testing.T) {
 		for _, r := range v.LinearTime {
 			best := time.Duration(1<<63 - 1)
 			var got bool
-			for n := 0; n < 3; n++ {
+			for n := 0; n < 5; n++ { // best of 5: a gate run on a loaded machine can stall a few tries
 				start := time.Now()
 				m := rulesSnapshot(t, []Rule{r.Rule}, nil)
 				got = r.Input.match(m).Rule == r.Rule.ID

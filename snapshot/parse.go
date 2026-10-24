@@ -338,7 +338,8 @@ const maxRepeat = 1000
 // and byte width; width 0 means "leave s alone" (a literal `{`, or a bound that has no exact RE2
 // spelling, which RE2 then rejects and the rule fails open). Only an upper bound at or past
 // MaxMatchInput is dropped (and only with a lower bound RE2 accepts): no capped input can reach
-// it, so dropping it is exact. A bound between 1001 and MaxMatchInput, or a lower bound past 1000,
+// it, so dropping it is exact. A leading-zero count (`{02}`, which JS reads as 2 but RE2 as literal
+// text) is respelled without the zeros. A bound between 1001 and MaxMatchInput, or a lower bound past 1000,
 // has no exact spelling, so it is left for RE2 to reject.
 func clampQuantifier(s string) (string, int) {
 	end := strings.IndexByte(s, '}')
@@ -352,13 +353,26 @@ func clampQuantifier(s string) (string, int) {
 	if !isDigits(lo) || comma && hi != "" && !isDigits(hi) {
 		return "", 0
 	}
-	if !comma || hi == "" || boundValue(hi) <= maxRepeat {
-		return "", 0
+	if comma && hi != "" && boundValue(hi) >= MaxMatchInput && boundValue(lo) <= maxRepeat {
+		return "{" + strconv.Itoa(boundValue(lo)) + ",}", end + 1
 	}
-	if boundValue(hi) < MaxMatchInput || boundValue(lo) > maxRepeat {
-		return "", 0
+	norm := "{" + trimZeros(lo)
+	if comma {
+		norm += "," + trimZeros(hi)
 	}
-	return "{" + strconv.Itoa(boundValue(lo)) + ",}", end + 1
+	norm += "}"
+	if norm != s[:end+1] {
+		return norm, end + 1
+	}
+	return "", 0
+}
+
+// trimZeros drops leading zeros from a digit string, keeping at least one digit.
+func trimZeros(d string) string {
+	if t := strings.TrimLeft(d, "0"); t != "" || d == "" {
+		return t
+	}
+	return "0"
 }
 
 // boundValue is a digit string's value, saturated so a huge bound cannot overflow.
