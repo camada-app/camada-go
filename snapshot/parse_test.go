@@ -213,6 +213,13 @@ func TestJSRegexSpellingsAreTranslated(t *testing.T) {
 	if CompileRegex(`\u00e`) != nil || CompileRegex(`\u{1F600}`) != nil { // not four hex digits: rejected, as re rejects it
 		t.Fatal("a malformed \\u compiled")
 	}
+	// JS (non-u): \x not followed by two hex digits is the letter x, so \x{02} is "xx", not U+0002
+	if rx := CompileRegex(`^bot\x{02}$`); rx == nil || !rx.MatchString("botxx") || rx.MatchString("bot\u0002") {
+		t.Fatal("\\x{02} must read as xx")
+	}
+	if rx := CompileRegex(`^\x41[\xg]$`); rx == nil || !rx.MatchString("Ax") || rx.MatchString("A\x00") {
+		t.Fatal("\\xHH stays a byte escape, a bare \\x is x")
+	}
 }
 
 func TestOneMatcherServesConcurrentRequestsWithoutCrosstalk(t *testing.T) {
