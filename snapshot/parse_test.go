@@ -384,3 +384,27 @@ func TestS5TwoValueRuleForControlChars(t *testing.T) {
 		t.Fatal("raw over cap, stripped under: skip misses")
 	}
 }
+
+func TestQuantifierBoundsAboveRE2CapAreClamped(t *testing.T) {
+	a := strings.Repeat("a", 1500)
+	for _, c := range []struct {
+		pat, in string
+		want    bool
+	}{
+		{`^a{1,5000}$`, "a", true},
+		{`^a{1,99999999999999999999}$`, a, true},
+		{`^a{1,5000}$`, "", false},
+		{`^a{2,}$`, "a", false},
+		{`^a{1500,}$`, a, true},
+		{`^a{1500,}$`, "a", false},
+		{`^a{3}$`, "aaa", true},
+		{`^a{,5000}$`, "a{,5000}", true}, // not a quantifier in JS: literal
+		{`^[a{5000}]+$`, "a{", true},     // inside a class: untouched
+		{`^a\{5000\}$`, "a{5000}", true},
+	} {
+		rx := CompileRegex(c.pat)
+		if rx == nil || rx.MatchString(c.in) != c.want {
+			t.Errorf("%s on len %d: want %v (rx nil: %v)", c.pat, len(c.in), c.want, rx == nil)
+		}
+	}
+}
