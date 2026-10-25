@@ -146,3 +146,40 @@ func TestRegexLimitVectors(t *testing.T) {
 		}
 	})
 }
+
+// camada-all-zpbv: a stored `matches` value that is empty or not a string never matches (no String()
+// coercion, no empty regex that matches everything), over or under the input cap.
+func TestEmptyOrNonStringMatchesNeverMatches(t *testing.T) {
+	vals := []any{json.Number("123"), json.Number("0"), true, nil, map[string]any{"x": 1}, []any{"^/a"}, []any{json.Number("123")}, ""}
+	str := "123 null 0 true None True [object Object] map[x:1] {'x': 1} [^/a] [123]" // every coerced form of vals
+	over := strings.Repeat("a", MaxMatchInput+1)
+	blk := Rule{ID: "cr_blk", Action: "block", Conds: []Cond{{F: "ip", Op: "is_not", V: "1.1.1.1"}}}
+	for _, v := range vals {
+		for _, f := range []string{"ua", "path", "header"} {
+			for _, cap := range []string{"", f} {
+				cond := Cond{F: f, Op: "matches", V: v}
+				if f == "header" {
+					cond.Name = "x-h"
+				}
+				in := MatchInput{IP: "8.8.8.8", Path: "/a/123/null/0/true", UA: str,
+					Header: func(string) (string, bool) { return str, true }}
+				switch cap {
+				case "ua":
+					in.UA = str + " " + over
+				case "path":
+					in.Path = "/a/123/null/0/true/" + over
+				case "header":
+					in.Header = func(string) (string, bool) { return str + " " + over, true }
+				}
+				name := func() string { b, _ := json.Marshal(v); return string(b) + " on " + f + " cap=" + cap }()
+				if rulesSnapshot(t, []Rule{{ID: "cr_b", Action: "block", Conds: []Cond{cond}}}, nil).Match(in).Block {
+					t.Errorf("%s: block rule blocked", name)
+				}
+				r := rulesSnapshot(t, []Rule{{ID: "cr_s", Action: "skip", Conds: []Cond{cond}}, blk}, nil).Match(in)
+				if r.Allowed || r.Rule != "cr_blk" {
+					t.Errorf("%s: skip exempted (allowed=%v rule=%q)", name, r.Allowed, r.Rule)
+				}
+			}
+		}
+	}
+}
