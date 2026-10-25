@@ -297,6 +297,11 @@ func jsToRE2(pattern string) (string, bool) {
 				i += 6
 				continue
 			}
+			if nxt >= '4' && nxt <= '7' && i+3 < n && isOctal(pattern[i+2]) && isOctal(pattern[i+3]) {
+				out.WriteString(`\0` + pattern[i+1:i+3]) // \4xx-\7xx: V8 (Annex B) reads two digits, Go three (U+0100+); the third digit stays literal
+				i += 3
+				continue
+			}
 			if nxt == 'x' && !(i+3 < n && isHex4(pattern[i+2:i+4])) {
 				out.WriteByte('x') // JS (non-u): \x without two hex digits is the letter x; RE2 would read \x{02} as U+0002
 				i += 2
@@ -361,6 +366,9 @@ func jsToRE2(pattern string) (string, bool) {
 	}
 	return out.String(), true
 }
+
+// isOctal reports whether c is 0-7.
+func isOctal(c byte) bool { return c >= '0' && c <= '7' }
 
 // isQuantifierAt reports whether s starts with `*`, `+`, `?` or a `{n}`, `{n,}`, `{n,m}` quantifier.
 func isQuantifierAt(s string) bool {
