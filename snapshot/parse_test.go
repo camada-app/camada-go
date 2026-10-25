@@ -578,6 +578,18 @@ func TestJsToRE2OctalEscapeThreeDigits(t *testing.T) {
 		{`x\777y`, "x?7y", nil},
 		{`x[\400]y`, "", map[rune]bool{' ': true, '0': true}},
 		{`x[\777]y`, "", map[rune]bool{'?': true, '7': true}},
+		// camada-all-fugt: in a class \1..\7 is a legacy octal escape (Go: a backreference), and a bare \c is a backslash then c
+		{`x[\1]y`, "", map[rune]bool{1: true}},
+		{`x[\1-\3]y`, "", map[rune]bool{1: true, 2: true, 3: true}},
+		{`x[\12]y`, "", map[rune]bool{'\n': true}},
+		{`x[\c-]y`, "", map[rune]bool{'-': true, '\\': true, 'c': true}},
+		{`x[\c-z]y`, "", func() map[rune]bool {
+			m := map[rune]bool{'\\': true}
+			for c := 'c'; c <= 'z'; c++ {
+				m[c] = true
+			}
+			return m
+		}()},
 	}
 	for _, tc := range cases {
 		rx := CompileRegex(tc.pat)
@@ -611,6 +623,10 @@ func TestJsToRE2ClassControlAndOctalAtoms(t *testing.T) {
 		{`x[\0-\47-\d]y`, map[string]bool{"x'y": true, "x-y": true, "x5y": true, "x\x00y": true, "x(y": false}},
 		{`x[\477]y`, map[string]bool{"x7y": true, "x'y": true, "x\u013fy": false}},
 		{`\400`, map[string]bool{" 0": true, "\u0100": false}},
+		{`[\7]`, map[string]bool{"\x07": true, "7": false}}, // camada-all-fugt
+		{`[\c]`, map[string]bool{"\\": true, "c": true, "\x03": false}},
+		{`x\c_y`, map[string]bool{`x\c_y`: true, "x\x1fy": false}},
+		{`x\c`, map[string]bool{`x\c`: true, "x": false}},
 	}
 	for _, tc := range cases {
 		rx := CompileRegex(tc.pat)
@@ -622,5 +638,12 @@ func TestJsToRE2ClassControlAndOctalAtoms(t *testing.T) {
 				t.Errorf("%q on %q: got %v, want %v", tc.pat, s, got, want)
 			}
 		}
+	}
+}
+
+// camada-all-fugt: outside a class \1 may be a real backreference; Go refuses it, so the rule fails open as before.
+func TestJsToRE2BackreferenceOutsideClass(t *testing.T) {
+	if CompileRegex(`(a)\1`) != nil {
+		t.Error(`(a)\1: compiled, want nil`)
 	}
 }
