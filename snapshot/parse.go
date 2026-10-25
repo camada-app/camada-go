@@ -299,6 +299,11 @@ func jsToRE2(pattern string) (string, bool) {
 			i += 2
 			continue
 		}
+		if inClass && ch == '[' {
+			out.WriteString(`\[`) // camada-all-07c7: JS reads a [ inside a class as text, RE2 reads [:alpha:] as a POSIX class
+			i++
+			continue
+		}
 		if inClass {
 			inClass = ch != ']'
 		} else if ch == '^' || ch == '$' {

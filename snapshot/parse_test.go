@@ -535,3 +535,38 @@ func TestMetaPathsRegexOverCapPathAnswersDeny(t *testing.T) {
 		t.Fatal("at-cap path blocked")
 	}
 }
+
+// camada-all-07c7: JS (non-u) reads a [ inside a class as text; RE2 reads [:alpha:] there as a POSIX class.
+func TestJSClassBracketIsLiteral(t *testing.T) {
+	if got, _ := jsToRE2(`x[[:alpha:]]y`); got != `x[\[:alpha:]]y` {
+		t.Fatalf("jsToRE2 = %q", got)
+	}
+	for _, c := range []struct {
+		pat     string
+		yes, no []string
+	}{
+		{`x[[:alpha:]]y`, []string{"xa]y", "x[]y", "x:]y"}, []string{"xby", "xay"}},
+		{`(?i)x[[:alpha:]]y`, []string{"XA]Y"}, []string{"XBY"}},
+		{`x[[:x:]]y`, []string{"x[]y", "x:]y"}, []string{"xby"}},
+		{`x[^[:a:]]y`, []string{"xb]y"}, []string{"xa]y", "x[]y", "xby"}},
+		{`x[[:a]y|b:]`, []string{"xay", "b:]"}, []string{"xby"}},
+		{`x[\[:alpha:]]y`, []string{"xa]y"}, []string{"xby"}},
+		{`x[a[]y`, []string{"x[y", "xay"}, []string{"xby"}},
+		{`x[[=a=]]y`, []string{"xa]y", "x=]y"}, []string{"xay"}},
+	} {
+		rx := CompileRegex(c.pat)
+		if rx == nil {
+			t.Fatalf("%s: nil", c.pat)
+		}
+		for _, s := range c.yes {
+			if !rx.MatchString(s) {
+				t.Errorf("%s should match %q", c.pat, s)
+			}
+		}
+		for _, s := range c.no {
+			if rx.MatchString(s) {
+				t.Errorf("%s should not match %q", c.pat, s)
+			}
+		}
+	}
+}
