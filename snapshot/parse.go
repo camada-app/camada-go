@@ -33,6 +33,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/camada-app/camada-go/internal/ipparse"
 )
@@ -268,9 +269,12 @@ func CompileRegex(pattern string) *regexp.Regexp {
 // 1000 cap (`{1,5000}`) -> the upper bound dropped when it is past MaxMatchInput, which is exact for
 // capped inputs. Anything else RE2 rejects still fails open. ok is false for a quantifier right after
 // ^ $ \b \B: JS throws on it, RE2 would accept it (`^{1,5000}` would even clamp to a bare `^`).
+// ok is also false for a - that JS reads as a literal but RE2 as a range, next to \s \S \d \D \w \W in a class
+// (`[\s-z]`): the JS copies throw there, so a stored rule never matches (camada-all-pcht).
 func jsToRE2(pattern string) (string, bool) {
 	var out strings.Builder
 	n, inClass, assertion := len(pattern), false, false
+	var ce, at, rng bool // camada-all-pcht, as in edge-analyst jsToRe2: last class atom is \s \d \w; an atom that can start a range; the - just read is a range operator
 	for i := 0; i < n; {
 		ch := pattern[i]
 		if assertion && !inClass && isQuantifierAt(pattern[i:]) {
@@ -280,6 +284,9 @@ func jsToRE2(pattern string) (string, bool) {
 		if ch == '\\' && i+1 < n {
 			nxt := pattern[i+1]
 			assertion = !inClass && (nxt == 'b' || nxt == 'B')
+			if inClass {
+				ce, at, rng = isClassEscape(nxt), !rng, false
+			}
 			if nxt == 'c' && i+2 < n && isASCIILetter(pattern[i+2]) {
 				out.WriteString(regexp.QuoteMeta(string(rune(pattern[i+2]&^0x20) - 64)))
 				i += 3
@@ -295,6 +302,14 @@ func jsToRE2(pattern string) (string, bool) {
 				i += 2
 				continue
 			}
+			if nxt == 'x' { // \xHH is one atom
+				out.WriteString(pattern[i : i+4])
+				i += 4
+				continue
+			}
+			if nxt == 'c' && inClass {
+				at = true // a bare \c is a backslash then c: two atoms
+			}
 			out.WriteString(pattern[i : i+2])
 			i += 2
 			continue
@@ -302,6 +317,17 @@ func jsToRE2(pattern string) (string, bool) {
 		if inClass {
 			if ch == '[' {
 				out.WriteByte('\\') // camada-all-07c7: JS reads a [ inside a class as text, RE2 reads [:alpha:] as a POSIX class
+			}
+			if ch == '-' && at && !(i+1 < n && pattern[i+1] == ']') { // a range operator; a - after a finished range is a literal
+				if ce || i+2 < n && pattern[i+1] == '\\' && isClassEscape(pattern[i+2]) {
+					return "", false // JS reads a - next to \s \d \w as a literal, RE2 as a range: refuse, never emulate
+				}
+				rng, at = true, false
+			} else if ch != ']' && utf8.RuneStart(ch) { // one atom per character, not per UTF-8 byte
+				ce, at, rng = false, !rng, false
+				if ch >= 0xF0 {
+					at = true // JS sees a surrogate pair: the low surrogate is a fresh atom
+				}
 			}
 			inClass = ch != ']'
 		} else if ch == '^' || ch == '$' {
@@ -317,7 +343,12 @@ func jsToRE2(pattern string) (string, bool) {
 				i += 2
 				continue
 			}
-			inClass = true
+			inClass, ce, at, rng = true, false, false, false
+			if i+1 < n && pattern[i+1] == '^' { // the ^ is part of the open, not an atom
+				out.WriteString("[^")
+				i += 2
+				continue
+			}
 		} else if ch == '{' {
 			if q, w := clampQuantifier(pattern[i:]); w > 0 {
 				out.WriteString(q)
@@ -410,6 +441,9 @@ func isDigits(s string) bool {
 }
 
 func isASCIILetter(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
+
+// isClassEscape reports whether \c is a class escape: \s \S \d \D \w \W.
+func isClassEscape(c byte) bool { return strings.IndexByte("sSdDwW", c) >= 0 }
 
 func isHex4(s string) bool {
 	for i := 0; i < len(s); i++ {
