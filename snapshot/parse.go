@@ -263,7 +263,7 @@ func CompileRegex(pattern string) *regexp.Regexp {
 }
 
 // jsToRE2 translates the JS-only spellings a tenant is likely to author: `[^]` (any char) ->
-// `[\s\S]`, `\cX` -> the control character, `\x` without two hex digits -> the letter x (as JS reads it), `\uXXXX` -> `\x{XXXX}` (RE2's code-point escape;
+// `[\s\S]`, `[]` (empty, never matches) -> `[^\x00-\x{10FFFF}]`, `\cX` -> the control character, `\x` without two hex digits -> the letter x (as JS reads it), `\uXXXX` -> `\x{XXXX}` (RE2's code-point escape;
 // Python's re reads `\uXXXX` natively, so the family agrees), and a quantifier bound above RE2's
 // 1000 cap (`{1,5000}`) -> the upper bound dropped when it is past MaxMatchInput, which is exact for
 // capped inputs. Anything else RE2 rejects still fails open. ok is false for a quantifier right after
@@ -307,6 +307,11 @@ func jsToRE2(pattern string) (string, bool) {
 			if strings.HasPrefix(pattern[i:], "[^]") {
 				out.WriteString(`[\s\S]`)
 				i += 3
+				continue
+			}
+			if strings.HasPrefix(pattern[i:], "[]") {
+				out.WriteString(`[^\x00-\x{10FFFF}]`)
+				i += 2
 				continue
 			}
 			inClass = true
