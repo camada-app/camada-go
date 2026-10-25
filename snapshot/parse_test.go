@@ -550,3 +550,18 @@ func TestJSClassBracketIsLiteral(t *testing.T) {
 		t.Fatalf("jsToRE2 = %q", got)
 	}
 }
+
+// camada-all-pcht: a multi-byte character is one class atom (JS reads a code unit, Go a byte), so a range
+// ending in one cannot start another; a 4-byte character is a surrogate pair, whose low half is a fresh atom.
+func TestJSToRE2ClassMultiByteAtoms(t *testing.T) {
+	for _, p := range []string{`x[a-é-\d]y`, `x[a-ж-\w]y`, `x[a-€-\d]y`, `x[é-ж-\d]y`} {
+		if got, ok := jsToRE2(p); !ok || got != p {
+			t.Errorf("%q: got (%q, %v), want unchanged and ok", p, got, ok)
+		}
+	}
+	for _, p := range []string{`x[a-😀-\d]y`, `[é-\d]`, `[\s-é]`} {
+		if _, ok := jsToRE2(p); ok {
+			t.Errorf("%q: jsToRE2 ok, want refused", p)
+		}
+	}
+}
