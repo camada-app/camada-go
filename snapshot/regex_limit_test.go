@@ -17,7 +17,7 @@ import (
 	"github.com/camada-app/camada-go/internal/testutil"
 )
 
-const regexLimitVectorsSHA256 = "ec076bfb26f12f0f90ffa42bb7b975c6f905afdfe01ba2caeedf6295dd533696"
+const regexLimitVectorsSHA256 = "da294143dd317792b38abc7097bb8185bfac32833d13d7a043f2101794a7c13b"
 
 const regexLimitVectors = "regex-limit/regex-limit-vectors.json"
 
@@ -76,6 +76,7 @@ type rlVectors struct {
 	Refused          []rlRow  `json:"refused"`
 	TranslateRefused []string `json:"translate_refused"`
 	Accepted         []string `json:"accepted"`
+	AcceptedMatch    []rlRow  `json:"accepted_match"`
 	RefusedRule      struct {
 		ID     string `json:"id"`
 		Action string `json:"action"`
@@ -136,19 +137,31 @@ func TestRegexLimitVectors(t *testing.T) {
 		}
 	})
 
-	t.Run("refused", func(t *testing.T) {
-		for _, r := range v.Refused {
-			rule := Rule{ID: v.RefusedRule.ID, Action: v.RefusedRule.Action,
-				Conds: []Cond{{F: v.RefusedRule.Field, Op: "matches", V: r.Pattern}}}
-			m := rulesSnapshot(t, []Rule{rule}, nil) // an uncompilable pattern must not fail the parse
-			for _, c := range r.Cases {
-				in := rlInput{IP: "8.8.8.8", UA: c.UA}
-				if got := in.match(m).Rule == rule.ID; got != c.Hit["go"] {
-					t.Errorf("%s %.40q: hit %v want %v", r.ID, c.UA.s, got, c.Hit["go"])
+	for _, s := range []struct {
+		name string
+		rows []rlRow
+	}{{"refused", v.Refused}, {"accepted_match", v.AcceptedMatch}} {
+		t.Run(s.name, func(t *testing.T) {
+			if len(s.rows) == 0 {
+				t.Fatalf("%s is empty", s.name)
+			}
+			for _, r := range s.rows {
+				rule := Rule{ID: v.RefusedRule.ID, Action: v.RefusedRule.Action,
+					Conds: []Cond{{F: v.RefusedRule.Field, Op: "matches", V: r.Pattern}}}
+				m := rulesSnapshot(t, []Rule{rule}, nil) // an uncompilable pattern must not fail the parse
+				for _, c := range r.Cases {
+					in := rlInput{IP: "8.8.8.8", UA: c.UA}
+					want, ok := c.Hit["go"]
+					if !ok {
+						t.Fatalf("%s %.40q: no hit[go]", r.ID, c.UA.s)
+					}
+					if got := in.match(m).Rule == rule.ID; got != want {
+						t.Errorf("%s %.40q: hit %v want %v", r.ID, c.UA.s, got, want)
+					}
 				}
 			}
-		}
-	})
+		})
+	}
 
 	// camada-all-pcht: a - next to \s \d \w in a class is a SyntaxError in the JS copies; here ok=false, so a stored rule never matches.
 	t.Run("translate_refused", func(t *testing.T) {
