@@ -597,3 +597,30 @@ func TestJsToRE2OctalEscapeThreeDigits(t *testing.T) {
 		}
 	}
 }
+
+// camada-all-pao7, camada-all-rmn4: [\c_] [\c0] and a legacy octal escape are one class atom, so a - after them
+// is a literal and the pattern translates (V8 ground truth from node).
+func TestJsToRE2ClassControlAndOctalAtoms(t *testing.T) {
+	cases := []struct {
+		pat string
+		in  map[string]bool
+	}{
+		{`x[\c_-a-\d]y`, map[string]bool{"x-y": true, "x5y": true, "x\x1fy": true, "xay": true, "x y": true}},
+		{`[\c0]`, map[string]bool{"\x10": true, "0": false, "\\": false, "c": false}},
+		{`x[\0-\12-\d]y`, map[string]bool{"x\ny": true, "x-y": true, "x5y": true, "x\x05y": true, "xay": false}},
+		{`x[\0-\47-\d]y`, map[string]bool{"x'y": true, "x-y": true, "x5y": true, "x\x00y": true, "x(y": false}},
+		{`x[\477]y`, map[string]bool{"x7y": true, "x'y": true, "x\u013fy": false}},
+		{`\400`, map[string]bool{" 0": true, "\u0100": false}},
+	}
+	for _, tc := range cases {
+		rx := CompileRegex(tc.pat)
+		if rx == nil {
+			t.Fatalf("%q: did not compile", tc.pat)
+		}
+		for s, want := range tc.in {
+			if got := rx.MatchString(s); got != want {
+				t.Errorf("%q on %q: got %v, want %v", tc.pat, s, got, want)
+			}
+		}
+	}
+}
