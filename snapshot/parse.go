@@ -287,8 +287,8 @@ func jsToRE2(pattern string) (string, bool) {
 			if inClass {
 				ce, at, rng = isClassEscape(nxt), !rng, false
 			}
-			if nxt == 'c' && i+2 < n && isASCIILetter(pattern[i+2]) {
-				out.WriteString(regexp.QuoteMeta(string(rune(pattern[i+2]&^0x20) - 64)))
+			if nxt == 'c' && i+2 < n && (isASCIILetter(pattern[i+2]) || inClass && (pattern[i+2] == '_' || isDigits(pattern[i+2:i+3]))) {
+				fmt.Fprintf(&out, `\x%02x`, pattern[i+2]%32) // \cX, and in a class [\c_] [\c0] (Annex B): one control-char atom
 				i += 3
 				continue
 			}
@@ -297,9 +297,20 @@ func jsToRE2(pattern string) (string, bool) {
 				i += 6
 				continue
 			}
-			if nxt >= '4' && nxt <= '7' && i+3 < n && isOctal(pattern[i+2]) && isOctal(pattern[i+3]) {
-				out.WriteString(`\0` + pattern[i+1:i+3]) // \4xx-\7xx: V8 (Annex B) reads two digits, Go three (U+0100+); the third digit stays literal
-				i += 3
+			if isOctal(nxt) { // a legacy octal escape is one atom: V8 reads up to 3 digits after 0-3, 2 after 4-7
+				d, limit := 1, 3
+				if nxt >= '4' {
+					limit = 2
+				}
+				for d < limit && i+1+d < n && isOctal(pattern[i+1+d]) {
+					d++
+				}
+				out.WriteByte('\\')
+				if d == 2 && nxt >= '4' && i+3 < n && isOctal(pattern[i+3]) {
+					out.WriteByte('0') // Go would read a third digit (U+0100+): \0 + the two V8 digits, the third stays fresh
+				}
+				out.WriteString(pattern[i+1 : i+1+d])
+				i += 1 + d
 				continue
 			}
 			if nxt == 'x' && !(i+3 < n && isHex4(pattern[i+2:i+4])) {
