@@ -33,6 +33,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/camada-app/camada-go/internal/ipparse"
 )
@@ -322,8 +323,11 @@ func jsToRE2(pattern string) (string, bool) {
 					return "", false // JS reads a - next to \s \d \w as a literal, RE2 as a range: refuse, never emulate
 				}
 				rng, at = true, false
-			} else if ch != ']' {
+			} else if ch != ']' && utf8.RuneStart(ch) { // one atom per character, not per UTF-8 byte
 				ce, at, rng = false, !rng, false
+				if ch >= 0xF0 {
+					at = true // JS sees a surrogate pair: the low surrogate is a fresh atom
+				}
 			}
 			inClass = ch != ']'
 		} else if ch == '^' || ch == '$' {
