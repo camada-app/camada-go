@@ -467,3 +467,41 @@ func TestLeadingZeroCountReadsAsJS(t *testing.T) {
 		}
 	}
 }
+
+func metaRegexMatcher(t *testing.T, pats ...string) *Matcher {
+	t.Helper()
+	snap, err := ParseSnapshot(container(0x424C4B35, nil), &Meta{Version: "v", PathsRegex: pats})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewMatcher(snap)
+}
+
+func TestMetaPathsRegexIsCaseInsensitive(t *testing.T) {
+	m := metaRegexMatcher(t, "^/DUMP$")
+	if m.Match(MatchInput{Path: "/dump"}).Reason != "path" {
+		t.Fatal("/dump not blocked")
+	}
+	if m.Match(MatchInput{Path: "/dumpx"}).Block {
+		t.Fatal("/dumpx blocked")
+	}
+}
+
+func TestMetaPathsRegexRefusedPatternNeverMatches(t *testing.T) {
+	m := metaRegexMatcher(t, "^/a(?=b)")
+	for _, p := range []string{"/ab", "/a"} {
+		if m.Match(MatchInput{Path: p}).Block {
+			t.Fatalf("%s blocked by a refused pattern", p)
+		}
+	}
+}
+
+func TestMetaPathsRegexOverCapPathAnswersDeny(t *testing.T) {
+	m := metaRegexMatcher(t, "^/never$")
+	if m.Match(MatchInput{Path: "/" + strings.Repeat("a", MaxMatchInput)}).Reason != "path" {
+		t.Fatal("over-cap path not blocked")
+	}
+	if m.Match(MatchInput{Path: "/" + strings.Repeat("a", MaxMatchInput-1)}).Block {
+		t.Fatal("at-cap path blocked")
+	}
+}

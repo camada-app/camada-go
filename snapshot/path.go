@@ -282,15 +282,15 @@ func dirSet(xs []string) map[string]struct{} {
 	return out
 }
 
-func pathIn(exact, prefix map[string]struct{}, regexes []*regexp.Regexp, p string) bool {
+func pathIn(exact, prefix map[string]struct{}, preds []func(string) bool, p string) bool {
 	if _, ok := exact[p]; ok {
 		return true
 	}
 	if len(prefix) > 0 && prefixHit(prefix, p) {
 		return true
 	}
-	for _, rx := range regexes {
-		if rx.MatchString(p) {
+	for _, pred := range preds {
+		if pred(p) {
 			return true
 		}
 	}
