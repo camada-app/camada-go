@@ -300,6 +300,9 @@ func jsToRE2(pattern string) (string, bool) {
 			continue
 		}
 		if inClass {
+			if ch == '[' {
+				out.WriteByte('\\') // camada-all-07c7: JS reads a [ inside a class as text, RE2 reads [:alpha:] as a POSIX class
+			}
 			inClass = ch != ']'
 		} else if ch == '^' || ch == '$' {
 			assertion = true

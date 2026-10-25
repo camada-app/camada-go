@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- fix (security): a `[` inside a class is literal as in JS; `[[:alpha:]]` was read as a POSIX class, and `[[:x:]]` never matched. (camada-all-07c7)
 - fix (security): snapshot meta `pathsRegex` entries are now tested like a path `matches` rule condition: case-insensitive, a pattern this SDK refuses never matches, and a path over 2048 chars answers block. (Go has no per-request regex budget: RE2 is linear-time.) `Snapshot.PathsRegex` is now `[]func(string) bool`. (camada-all-rvuh)
 - feat: the first-party beacon relay (/_cam/fp) stamps `rts`, its own clock in epoch ms, on the sig:1 row (overwriting any browser-supplied `rts`), so the analyst can place the beacon on the same clock as the request rows. (camada-all-wd3b)
 - fix: a signalled response (`x-camada-challenge: 1`) now also sets `cdn-cache-control`, `surrogate-control`, `cloudflare-cdn-cache-control`, `vercel-cdn-cache-control` and `netlify-cdn-cache-control` to `no-store`, overriding the app's. CDNs read those ahead of `cache-control`, so an app-set one could still let a shared cache keep the per-client copy. (camada-all-1zlg)
