@@ -183,6 +183,36 @@ func TestTwoIPConditionsConsumeTwoSectionPairsInOrder(t *testing.T) {
 	}
 }
 
+func TestJSEmptyClassNeverMatches(t *testing.T) {
+	for _, c := range []struct {
+		pat string
+		yes []string
+		no  []string
+	}{
+		{`x[]-\d]y`, nil, []string{"x]-5]y", "x-5]y", "x]y"}},
+		{`x[^]-\d]y`, []string{"xz-5]y"}, []string{"x]y"}},
+		{`x[]a]y`, nil, []string{"x]y", "xay", "xa]y"}},
+		{`x[^]a]y`, []string{"xza]y"}, []string{"xay"}},
+		{`(?i)x[]a]y`, nil, []string{"XA]Y"}},
+		{`a\[]`, []string{"a[]"}, nil},
+	} {
+		rx := CompileRegex(c.pat)
+		if rx == nil {
+			t.Fatalf("%s did not compile", c.pat)
+		}
+		for _, s := range c.yes {
+			if !rx.MatchString(s) {
+				t.Errorf("%s should match %q", c.pat, s)
+			}
+		}
+		for _, s := range c.no {
+			if rx.MatchString(s) {
+				t.Errorf("%s should not match %q", c.pat, s)
+			}
+		}
+	}
+}
+
 func TestJSRegexSpellingsAreTranslated(t *testing.T) {
 	m := rulesSnapshot(t, []Rule{{ID: "ver", Action: "block", Conds: []Cond{{F: "path", Op: "matches", V: `^/api/(?<ver>v\d+)/`}}}}, nil)
 	if m.Match(MatchInput{Path: "/api/v2/dump"}).Rule != "ver" {
