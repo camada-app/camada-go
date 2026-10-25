@@ -565,3 +565,35 @@ func TestJSToRE2ClassMultiByteAtoms(t *testing.T) {
 		}
 	}
 }
+
+// camada-all-z3l0: V8 (Annex B) reads \4xx-\7xx as a two-digit octal escape then a literal digit;
+// Go would read three digits (U+0100+). Checked over every BMP code unit.
+func TestJsToRE2OctalEscapeThreeDigits(t *testing.T) {
+	cases := []struct {
+		pat  string
+		full string        // the one string outside the one-code-unit sweep that must match
+		in   map[rune]bool // code units c for which "x"+c+"y" must match
+	}{
+		{`x\400y`, "x 0y", nil},
+		{`x\777y`, "x?7y", nil},
+		{`x[\400]y`, "", map[rune]bool{' ': true, '0': true}},
+		{`x[\777]y`, "", map[rune]bool{'?': true, '7': true}},
+	}
+	for _, tc := range cases {
+		rx := CompileRegex(tc.pat)
+		if rx == nil {
+			t.Fatalf("%q: did not compile", tc.pat)
+		}
+		if tc.full != "" && !rx.MatchString(tc.full) {
+			t.Errorf("%q: want match on %q", tc.pat, tc.full)
+		}
+		for c := rune(0); c <= 0xFFFF; c++ {
+			if c >= 0xD800 && c <= 0xDFFF {
+				continue
+			}
+			if got := rx.MatchString("x" + string(c) + "y"); got != tc.in[c] {
+				t.Fatalf("%q on U+%04X: got %v, want %v", tc.pat, c, got, tc.in[c])
+			}
+		}
+	}
+}
