@@ -477,6 +477,10 @@ func safeHeader(r *RuleRequest, name string) (v string, ok bool) {
 // pair per ip condition, in condition order, so an ip condition consumes the next one.
 func compileCond(c Cond, sets *[][2]Bits, deny bool) RuleCond {
 	f, op := c.F, c.Op
+	// camada-all-zpbv: a stored matches value that is empty or not a string never matches (no String() coercion).
+	if s, ok := c.V.(string); op == "matches" && (!ok || s == "") {
+		return func(*RuleRequest) bool { return false }
+	}
 	if f == "path" { // every path op reads the canonical forms (path.go)
 		pred := pathPred(op, stringValues(c.V), deny)
 		return func(r *RuleRequest) bool { return pathHit(pred, &r.Paths, deny) }
