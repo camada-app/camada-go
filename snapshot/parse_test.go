@@ -578,6 +578,18 @@ func TestJsToRE2OctalEscapeThreeDigits(t *testing.T) {
 		{`x\777y`, "x?7y", nil},
 		{`x[\400]y`, "", map[rune]bool{' ': true, '0': true}},
 		{`x[\777]y`, "", map[rune]bool{'?': true, '7': true}},
+		// camada-all-fugt: in a class \1..\7 is a legacy octal escape (Go: a backreference), and a bare \c is a backslash then c
+		{`x[\1]y`, "", map[rune]bool{1: true}},
+		{`x[\1-\3]y`, "", map[rune]bool{1: true, 2: true, 3: true}},
+		{`x[\12]y`, "", map[rune]bool{'\n': true}},
+		{`x[\c-]y`, "", map[rune]bool{'-': true, '\\': true, 'c': true}},
+		{`x[\c-z]y`, "", func() map[rune]bool {
+			m := map[rune]bool{'\\': true}
+			for c := 'c'; c <= 'z'; c++ {
+				m[c] = true
+			}
+			return m
+		}()},
 	}
 	for _, tc := range cases {
 		rx := CompileRegex(tc.pat)
@@ -611,6 +623,10 @@ func TestJsToRE2ClassControlAndOctalAtoms(t *testing.T) {
 		{`x[\0-\47-\d]y`, map[string]bool{"x'y": true, "x-y": true, "x5y": true, "x\x00y": true, "x(y": false}},
 		{`x[\477]y`, map[string]bool{"x7y": true, "x'y": true, "x\u013fy": false}},
 		{`\400`, map[string]bool{" 0": true, "\u0100": false}},
+		{`[\7]`, map[string]bool{"\x07": true, "7": false}}, // camada-all-fugt
+		{`[\c]`, map[string]bool{"\\": true, "c": true, "\x03": false}},
+		{`x\c_y`, map[string]bool{`x\c_y`: true, "x\x1fy": false}},
+		{`x\c`, map[string]bool{`x\c`: true, "x": false}},
 	}
 	for _, tc := range cases {
 		rx := CompileRegex(tc.pat)
@@ -625,60 +641,9 @@ func TestJsToRE2ClassControlAndOctalAtoms(t *testing.T) {
 	}
 }
 
-// camada-all-fugt: in a class V8 (Annex B) reads \1..\7 as a legacy octal escape (Go: a backreference), and a
-// \c with no letter after it as a literal backslash then c (Go rejects \c). Expectations are V8 ground truth
-// from node (`new RegExp(p).test(s)`), swept over every BMP code unit.
-func TestJsToRE2ClassOctalAndBareC(t *testing.T) {
-	cases := []struct {
-		pat string
-		in  []rune // the code units c for which "x"+c+"y" must match
-	}{
-		{`x[\1]y`, []rune{1}},
-		{`x[\1-\3]y`, []rune{1, 2, 3}},
-		{`x[\12]y`, []rune{'\n'}},
-		{`x[\c-]y`, []rune{'-', '\\', 'c'}},
-		{`x[\c-z]y`, append([]rune{'\\'}, []rune("cdefghijklmnopqrstuvwxyz")...)},
-	}
-	for _, tc := range cases {
-		rx := CompileRegex(tc.pat)
-		if rx == nil {
-			t.Fatalf("%q: did not compile", tc.pat)
-		}
-		want := map[rune]bool{}
-		for _, c := range tc.in {
-			want[c] = true
-		}
-		for c := rune(0); c <= 0xFFFF; c++ {
-			if c >= 0xD800 && c <= 0xDFFF {
-				continue
-			}
-			if got := rx.MatchString("x" + string(c) + "y"); got != want[c] {
-				t.Fatalf("%q on U+%04X: got %v, want %v", tc.pat, c, got, want[c])
-			}
-		}
-	}
-	for _, tc := range []struct {
-		pat string
-		in  map[string]bool
-	}{
-		{`[\1]`, map[string]bool{"\x01": true, "1": false}},
-		{`[\7]`, map[string]bool{"\x07": true, "7": false}},
-		{`[\c]`, map[string]bool{"\\": true, "c": true, "\x03": false}},
-		{`x\c_y`, map[string]bool{`x\c_y`: true, "x\x1fy": false}},
-		{`x\c`, map[string]bool{`x\c`: true, "x": false}},
-	} {
-		rx := CompileRegex(tc.pat)
-		if rx == nil {
-			t.Fatalf("%q: did not compile", tc.pat)
-		}
-		for s, want := range tc.in {
-			if got := rx.MatchString(s); got != want {
-				t.Errorf("%q on %q: got %v, want %v", tc.pat, s, got, want)
-			}
-		}
-	}
-	// outside a class \1 may be a real backreference: Go refuses it, so the rule fails open as before
-	if rx := CompileRegex(`(a)\1`); rx != nil {
-		t.Errorf(`(a)\1: compiled, want nil`)
+// camada-all-fugt: outside a class \1 may be a real backreference; Go refuses it, so the rule fails open as before.
+func TestJsToRE2BackreferenceOutsideClass(t *testing.T) {
+	if CompileRegex(`(a)\1`) != nil {
+		t.Error(`(a)\1: compiled, want nil`)
 	}
 }
