@@ -15,7 +15,7 @@ import (
 	"github.com/camada-app/camada-go/internal/testutil"
 )
 
-const regexLimitVectorsSHA256 = "805e8ce0b02150444bfd6717c7c636e335af6a8a26e0ccb6c5d26d698f6bded9"
+const regexLimitVectorsSHA256 = "79cd3686277fd9630592338a65d24e49f791aba5f1a182e7eef598eacae2fd24"
 
 const regexLimitVectors = "regex-limit/regex-limit-vectors.json"
 
