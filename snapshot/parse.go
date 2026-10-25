@@ -264,7 +264,7 @@ func CompileRegex(pattern string) *regexp.Regexp {
 }
 
 // jsToRE2 translates the JS-only spellings a tenant is likely to author: `[^]` (any char) ->
-// `[\s\S]`, `[]` (empty, never matches) -> `[^\x00-\x{10FFFF}]`, `\cX` -> the control character, `\x` without two hex digits -> the letter x (as JS reads it), `\uXXXX` -> `\x{XXXX}` (RE2's code-point escape;
+// `[\s\S]`, `[]` (empty, never matches) -> `[^\x00-\x{10FFFF}]`, `\cX` -> the control character, a bare `\c` -> literal backslash then c, `[\1]` (legacy octal in a class) -> `[\01]`, `\x` without two hex digits -> the letter x (as JS reads it), `\uXXXX` -> `\x{XXXX}` (RE2's code-point escape;
 // Python's re reads `\uXXXX` natively, so the family agrees), and a quantifier bound above RE2's
 // 1000 cap (`{1,5000}`) -> the upper bound dropped when it is past MaxMatchInput, which is exact for
 // capped inputs. Anything else RE2 rejects still fails open. ok is false for a quantifier right after
@@ -306,8 +306,8 @@ func jsToRE2(pattern string) (string, bool) {
 					d++
 				}
 				out.WriteByte('\\')
-				if d == 2 && nxt >= '4' && i+3 < n && isOctal(pattern[i+3]) {
-					out.WriteByte('0') // Go would read a third digit (U+0100+): \0 + the two V8 digits, the third stays fresh
+				if inClass && d < 3 || d == 2 && nxt >= '4' && i+3 < n && isOctal(pattern[i+3]) {
+					out.WriteByte('0') // in a class Annex B \1 is U+0001 (Go: a backreference), so \0 + the digits; or Go would read a third digit (U+0100+): \0 + the two V8 digits, the third stays fresh
 				}
 				out.WriteString(pattern[i+1 : i+1+d])
 				i += 1 + d
@@ -325,6 +325,11 @@ func jsToRE2(pattern string) (string, bool) {
 			}
 			if nxt == 'c' && inClass {
 				at = true // a bare \c is a backslash then c: two atoms
+			}
+			if nxt == 'c' {
+				out.WriteString(`\\c`) // a bare \c (also a trailing one) is a literal backslash then c; Go rejects \c
+				i += 2
+				continue
 			}
 			out.WriteString(pattern[i : i+2])
 			i += 2
