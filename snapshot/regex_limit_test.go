@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -171,14 +172,15 @@ func TestEmptyOrNonStringMatchesNeverMatches(t *testing.T) {
 				case "header":
 					in.Header = func(string) (string, bool) { return str + " " + over, true }
 				}
-				name := func() string { b, _ := json.Marshal(v); return string(b) + " on " + f + " cap=" + cap }()
-				if rulesSnapshot(t, []Rule{{ID: "cr_b", Action: "block", Conds: []Cond{cond}}}, nil).Match(in).Block {
-					t.Errorf("%s: block rule blocked", name)
-				}
-				r := rulesSnapshot(t, []Rule{{ID: "cr_s", Action: "skip", Conds: []Cond{cond}}, blk}, nil).Match(in)
-				if r.Allowed || r.Rule != "cr_blk" {
-					t.Errorf("%s: skip exempted (allowed=%v rule=%q)", name, r.Allowed, r.Rule)
-				}
+				t.Run(fmt.Sprintf("%v on %s cap=%s", v, f, cap), func(t *testing.T) {
+					if rulesSnapshot(t, []Rule{{ID: "cr_b", Action: "block", Conds: []Cond{cond}}}, nil).Match(in).Block {
+						t.Error("block rule blocked")
+					}
+					r := rulesSnapshot(t, []Rule{{ID: "cr_s", Action: "skip", Conds: []Cond{cond}}, blk}, nil).Match(in)
+					if r.Allowed || r.Rule != "cr_blk" {
+						t.Errorf("skip exempted (allowed=%v rule=%q)", r.Allowed, r.Rule)
+					}
+				})
 			}
 		}
 	}
