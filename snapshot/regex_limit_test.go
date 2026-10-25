@@ -1,7 +1,8 @@
 package snapshot
 
 // Contract regex-limit v1 (camada-all-2pap): the shared vectors in camada-core. Go's regexp is
-// linear, so every over-limit row answers hit[linear] and no source change is needed here. A
+// linear, so every over-limit row answers hit[linear] and no source change is needed here; the
+// translate_refused rows (camada-all-pcht) are the one place jsToRE2 must refuse. A
 // failure means the port drifted from the contract — fix the port, never the vectors.
 
 import (
@@ -72,8 +73,10 @@ type rlVectors struct {
 		rlRow
 		Hit bool `json:"hit"`
 	} `json:"linear_time"`
-	Refused     []rlRow `json:"refused"`
-	RefusedRule struct {
+	Refused          []rlRow  `json:"refused"`
+	TranslateRefused []string `json:"translate_refused"`
+	Accepted         []string `json:"accepted"`
+	RefusedRule      struct {
 		ID     string `json:"id"`
 		Action string `json:"action"`
 		Field  string `json:"field"`
@@ -143,6 +146,34 @@ func TestRegexLimitVectors(t *testing.T) {
 				if got := in.match(m).Rule == rule.ID; got != c.Hit["go"] {
 					t.Errorf("%s %.40q: hit %v want %v", r.ID, c.UA.s, got, c.Hit["go"])
 				}
+			}
+		}
+	})
+
+	// camada-all-pcht: a - next to \s \d \w in a class is a SyntaxError in the JS copies; here ok=false, so a stored rule never matches.
+	t.Run("translate_refused", func(t *testing.T) {
+		if len(v.TranslateRefused) == 0 {
+			t.Fatal("no translate_refused rows")
+		}
+		for _, p := range v.TranslateRefused {
+			if _, ok := jsToRE2(p); ok {
+				t.Errorf("%q: jsToRE2 ok, want refused", p)
+			}
+			rule := Rule{ID: v.RefusedRule.ID, Action: v.RefusedRule.Action,
+				Conds: []Cond{{F: v.RefusedRule.Field, Op: "matches", V: p}}}
+			m := rulesSnapshot(t, []Rule{rule}, nil)
+			for _, ua := range []string{"z-", "az", "x[-5y", "-", " z", "xay", "xAy", "x5y", "a-b"} {
+				if (rlInput{IP: "8.8.8.8", UA: rlValue{ua}}).match(m).Rule == rule.ID {
+					t.Errorf("%q matched ua %q", p, ua)
+				}
+			}
+		}
+	})
+
+	t.Run("accepted_translate", func(t *testing.T) {
+		for _, p := range v.Accepted {
+			if _, ok := jsToRE2(p); !ok {
+				t.Errorf("%q: jsToRE2 refused an accepted row", p)
 			}
 		}
 	})
