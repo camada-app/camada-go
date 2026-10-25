@@ -498,10 +498,10 @@ func TestMetaPathsRegexRefusedPatternNeverMatches(t *testing.T) {
 
 func TestMetaPathsRegexOverCapPathAnswersDeny(t *testing.T) {
 	m := metaRegexMatcher(t, "^/never$")
-	if m.Match(MatchInput{Path: "/" + strings.Repeat("a", 2048)}).Reason != "path" {
+	if m.Match(MatchInput{Path: "/" + strings.Repeat("a", MaxMatchInput)}).Reason != "path" {
 		t.Fatal("over-cap path not blocked")
 	}
-	if m.Match(MatchInput{Path: "/" + strings.Repeat("a", 2047)}).Block {
-		t.Fatal("2048-unit path blocked")
+	if m.Match(MatchInput{Path: "/" + strings.Repeat("a", MaxMatchInput-1)}).Block {
+		t.Fatal("at-cap path blocked")
 	}
 }
