@@ -171,6 +171,9 @@ func TestRegexLimitVectors(t *testing.T) {
 	})
 
 	t.Run("accepted_translate", func(t *testing.T) {
+		if len(v.Accepted) == 0 {
+			t.Fatal("no accepted rows")
+		}
 		for _, p := range v.Accepted {
 			if _, ok := jsToRE2(p); !ok {
 				t.Errorf("%q: jsToRE2 refused an accepted row", p)
