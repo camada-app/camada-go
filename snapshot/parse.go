@@ -148,10 +148,13 @@ type Snapshot struct {
 	TLS         map[string]struct{}
 	PathsExact  map[string]struct{}
 	PathsPrefix map[string]struct{}
-	PathsRegex  []*regexp.Regexp
-	Allow       RangeSet
-	Challenge   RangeSet
-	Rules       []CompiledRule // v5 only; empty on v3/v4, and the matcher then skips them
+	// PathsRegex: one predicate per meta entry, built like a path `matches` condition (case-insensitive;
+	// a refused pattern never matches; a form over MaxMatchInput answers deny). RE2 is linear-time, so
+	// there is no per-request regex budget to share with the rule walk.
+	PathsRegex []func(string) bool
+	Allow      RangeSet
+	Challenge  RangeSet
+	Rules      []CompiledRule // v5 only; empty on v3/v4, and the matcher then skips them
 }
 
 func set(xs []string) map[string]struct{} {
@@ -651,11 +654,9 @@ func ParseSnapshot(raw []byte, meta *Meta) (*Snapshot, error) {
 			sec[t] = s
 		}
 	}
-	var regexes []*regexp.Regexp
+	var regexes []func(string) bool
 	for _, p := range meta.PathsRegex {
-		if rx := compilePathRegex(p); rx != nil {
-			regexes = append(regexes, rx)
-		}
+		regexes = append(regexes, pathPred("matches", []string{p}, true))
 	}
 	idx4, err := fixed(sec[3], 65537)
 	if err != nil {
