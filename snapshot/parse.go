@@ -284,7 +284,7 @@ func jsToRE2(pattern string) (string, bool) {
 			nxt := pattern[i+1]
 			assertion = !inClass && (nxt == 'b' || nxt == 'B')
 			if inClass {
-				ce, at, rng = strings.IndexByte("sSdDwW", nxt) >= 0, !rng, false
+				ce, at, rng = isClassEscape(nxt), !rng, false
 			}
 			if nxt == 'c' && i+2 < n && isASCIILetter(pattern[i+2]) {
 				out.WriteString(regexp.QuoteMeta(string(rune(pattern[i+2]&^0x20) - 64)))
@@ -318,7 +318,7 @@ func jsToRE2(pattern string) (string, bool) {
 				out.WriteByte('\\') // camada-all-07c7: JS reads a [ inside a class as text, RE2 reads [:alpha:] as a POSIX class
 			}
 			if ch == '-' && at && !(i+1 < n && pattern[i+1] == ']') { // a range operator; a - after a finished range is a literal
-				if ce || i+2 < n && pattern[i+1] == '\\' && strings.IndexByte("sSdDwW", pattern[i+2]) >= 0 {
+				if ce || i+2 < n && pattern[i+1] == '\\' && isClassEscape(pattern[i+2]) {
 					return "", false // JS reads a - next to \s \d \w as a literal, RE2 as a range: refuse, never emulate
 				}
 				rng, at = true, false
@@ -437,6 +437,9 @@ func isDigits(s string) bool {
 }
 
 func isASCIILetter(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
+
+// isClassEscape reports whether \c is a class escape: \s \S \d \D \w \W.
+func isClassEscape(c byte) bool { return strings.IndexByte("sSdDwW", c) >= 0 }
 
 func isHex4(s string) bool {
 	for i := 0; i < len(s); i++ {
