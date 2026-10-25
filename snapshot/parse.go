@@ -297,10 +297,25 @@ func jsToRE2(pattern string) (string, bool) {
 				i += 6
 				continue
 			}
-			if nxt >= '4' && nxt <= '7' && i+3 < n && isOctal(pattern[i+2]) && isOctal(pattern[i+3]) {
-				out.WriteString(`\0` + pattern[i+1:i+3]) // \4xx-\7xx: V8 (Annex B) reads two digits, Go three (U+0100+); the third digit stays literal
+			if nxt == 'c' && inClass && i+2 < n && (pattern[i+2] == '_' || pattern[i+2] >= '0' && pattern[i+2] <= '9') {
+				fmt.Fprintf(&out, `\x%02x`, pattern[i+2]%32) // [\c_] [\c0] is one control-char atom in a class (Annex B)
 				i += 3
 				continue
+			}
+			if isOctal(nxt) { // a legacy octal escape is one atom: V8 reads up to 3 digits after 0-3, 2 after 4-7
+				d := 1
+				for d < 3-int(nxt>>2&1) && i+1+d < n && isOctal(pattern[i+1+d]) {
+					d++
+				}
+				if d > 1 {
+					out.WriteByte('\\')
+					if d == 2 && nxt >= '4' && i+3 < n && isOctal(pattern[i+3]) {
+						out.WriteByte('0') // Go would read a third digit (U+0100+): \0 + the two V8 digits, the third stays fresh
+					}
+					out.WriteString(pattern[i+1 : i+1+d])
+					i += 1 + d
+					continue
+				}
 			}
 			if nxt == 'x' && !(i+3 < n && isHex4(pattern[i+2:i+4])) {
 				out.WriteByte('x') // JS (non-u): \x without two hex digits is the letter x; RE2 would read \x{02} as U+0002
