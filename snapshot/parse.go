@@ -274,6 +274,8 @@ func CompileRegex(pattern string) *regexp.Regexp {
 // ok is also false for a quantifier (? * + {n} {n,} {n,m}, lazy forms too) right after a written
 // surrogate pair outside a class, raw (😀) or escaped (\uD83D\uDE00): JS without u repeats only the low
 // unit, RE2 the whole character, so a stored rule never matches; x(?:😀)?y is the portable spelling (camada-all-k938).
+// ok is also false for a raw astral character anywhere inside [ ] (a member, a range end, a negated class): JS reads
+// its two units, RE2 one code point; x(?:😀|a)y for x[😀a]y is the portable spelling (camada-all-cfx4).
 func jsToRE2(pattern string) (string, bool) {
 	var out strings.Builder
 	n, inClass, assertion := len(pattern), false, false
@@ -339,6 +341,9 @@ func jsToRE2(pattern string) (string, bool) {
 			continue
 		}
 		if inClass {
+			if ch >= 0xF0 {
+				return "", false // a raw astral character inside [ ]: JS reads its two units, RE2 one code point (camada-all-cfx4)
+			}
 			if ch == '[' {
 				out.WriteByte('\\') // camada-all-07c7: JS reads a [ inside a class as text, RE2 reads [:alpha:] as a POSIX class
 			}
@@ -349,9 +354,6 @@ func jsToRE2(pattern string) (string, bool) {
 				rng, at = true, false
 			} else if ch != ']' && utf8.RuneStart(ch) { // one atom per character, not per UTF-8 byte
 				ce, at, rng = false, !rng, false
-				if ch >= 0xF0 {
-					at = true // JS sees a surrogate pair: the low surrogate is a fresh atom
-				}
 			}
 			inClass = ch != ']'
 		} else if ch == '^' || ch == '$' {
