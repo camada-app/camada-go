@@ -263,8 +263,7 @@ func CompileRegex(pattern string) *regexp.Regexp {
 	return rx
 }
 
-// countGroups counts the capture groups of a JS pattern: a ( outside a class and an escape that is not
-// (?: (?= (?! (?<= (?<! ; (?<name> counts.
+// countGroups counts the capture groups of a JS pattern: an unescaped ( outside a class, except (?: (?= (?! (?<= (?<! ; (?<name> counts.
 func countGroups(pattern string) int {
 	g, inClass := 0, false
 	for i := 0; i < len(pattern); i++ {
