@@ -323,8 +323,8 @@ func jsToRE2(pattern string) (string, bool) {
 				continue
 			}
 			if nxt == 'u' && i+5 < n && isHex4(pattern[i+2:i+6]) {
-				if cp, ok := rune(0), false; !inClass {
-					if cp, ok = surrogatePair(pattern[i:min(i+12, n)]); ok {
+				if !inClass {
+					if cp, ok := surrogatePair(pattern[i:min(i+12, n)]); ok {
 						if i+12 < n && isQuantifierAt(pattern[i+12:]) {
 							return "", false // JS repeats only the low unit, RE2 the whole character
 						}
