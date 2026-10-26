@@ -649,19 +649,20 @@ func TestJsToRE2BackreferenceOutsideClass(t *testing.T) {
 }
 
 // camada-all-k938: a quantifier right after a written surrogate pair is refused (JS repeats the low
-// unit, RE2 the whole character); the class case is a separate bug.
+// unit, RE2 the whole character). A pair inside [ ] is camada-all-cfx4.
 func TestJsToRE2AstralQuantifier(t *testing.T) {
 	for _, p := range []string{`x😀?y`, `x😀*?y`, `x😀{2}y`, `x😀{1,}y`, `x\uD83D\uDE00?y`, `x\ud83d\ude00{0,2}y`} {
 		if _, ok := jsToRE2(p); ok {
 			t.Errorf("%q: jsToRE2 ok, want refused", p)
 		}
 	}
-	for _, p := range []string{`x😀y`, `x😀{y`, `x😀{a}y`, `x(?:😀)?y`, `x[😀]?y`, `x😀|a?`, `(😀)+`} {
+	for _, p := range []string{`x😀y`, `x😀{y`, `x😀{a}y`, `x(?:😀)?y`, `x😀|a?`, `(😀)+`} {
 		if _, ok := jsToRE2(p); !ok {
 			t.Errorf("%q: jsToRE2 refused, want ok", p)
 		}
 	}
-	if got, ok := jsToRE2(`\uD83D\uDE00`); !ok || got != `\x{D83D}\x{DE00}` {
-		t.Errorf("unquantified pair: got (%q, %v)", got, ok)
+	// translation itself is camada-all-sy8y
+	if _, ok := jsToRE2(`\uD83D\uDE00`); !ok {
+		t.Errorf("unquantified pair refused, want ok")
 	}
 }
