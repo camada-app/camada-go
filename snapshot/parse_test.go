@@ -552,14 +552,14 @@ func TestJSClassBracketIsLiteral(t *testing.T) {
 }
 
 // camada-all-pcht: a multi-byte character is one class atom (JS reads a code unit, Go a byte), so a range
-// ending in one cannot start another. x[a-😀-\d]y stays refused, now by camada-all-cfx4 (astral inside [ ]).
+// ending in one cannot start another.
 func TestJSToRE2ClassMultiByteAtoms(t *testing.T) {
 	for _, p := range []string{`x[a-é-\d]y`, `x[a-ж-\w]y`, `x[a-€-\d]y`, `x[é-ж-\d]y`} {
 		if got, ok := jsToRE2(p); !ok || got != p {
 			t.Errorf("%q: got (%q, %v), want unchanged and ok", p, got, ok)
 		}
 	}
-	for _, p := range []string{`x[a-😀-\d]y`, `[é-\d]`, `[\s-é]`} {
+	for _, p := range []string{`[é-\d]`, `[\s-é]`} {
 		if _, ok := jsToRE2(p); ok {
 			t.Errorf("%q: jsToRE2 ok, want refused", p)
 		}
@@ -670,7 +670,7 @@ func TestJsToRE2AstralQuantifier(t *testing.T) {
 // camada-all-cfx4: a raw astral character inside [ ] is refused (JS reads two units, RE2 one code point).
 // Escaped halves stay (every engine reads two); the outside-the-brackets spelling is the portable one.
 func TestJSToRE2AstralClass(t *testing.T) {
-	for _, p := range []string{`x[😀]y`, `x[😀]?y`, `x[a😀]y`, `x[😀a]y`, `x[a-😀]y`, `x[^😀]y`, `x[😀-😂]y`, `x[\]😀]y`, `x[[😀]y`, `[😀]`} {
+	for _, p := range []string{`x[😀]y`, `x[😀]?y`, `x[a😀]y`, `x[😀a]y`, `x[a-😀]y`, `x[^😀]y`, `x[😀-😂]y`, `x[\]😀]y`, `x[[😀]y`, `[😀]`, `x[a-😀-\d]y`} {
 		if _, ok := jsToRE2(p); ok {
 			t.Errorf("%q: jsToRE2 ok, want refused", p)
 		}
@@ -678,7 +678,7 @@ func TestJSToRE2AstralClass(t *testing.T) {
 			t.Errorf("%q: compiles, want nil", p)
 		}
 	}
-	for _, p := range []string{`x[a-z]y`, `x[é]y`, `x[a-é-\d]y`, `x[\uD83D\uDE00]y`, `x[^\uD83D\uDE00]y`, `x😀y`, `x(?:😀|a)y`, `x(?:😀)?y`, `x(?:[a-z]|😀)y`, `x\[😀]y`, `x[^]😀y`} {
+	for _, p := range []string{`x[a-z]y`, `x[é]y`, `x[\uD83D\uDE00]y`, `x[^\uD83D\uDE00]y`, `x😀y`, `x(?:😀|a)y`, `x(?:😀)?y`, `x(?:[a-z]|😀)y`, `x\[😀]y`, `x[^]😀y`} {
 		if _, ok := jsToRE2(p); !ok {
 			t.Errorf("%q: jsToRE2 refused, want ok", p)
 		}
