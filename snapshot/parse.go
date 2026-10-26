@@ -271,6 +271,12 @@ func CompileRegex(pattern string) *regexp.Regexp {
 // ^ $ \b \B: JS throws on it, RE2 would accept it (`^{1,5000}` would even clamp to a bare `^`).
 // ok is also false for a - that JS reads as a literal but RE2 as a range, next to \s \S \d \D \w \W in a class
 // (`[\s-z]`): the JS copies throw there, so a stored rule never matches (camada-all-pcht).
+// ok is also false for a quantifier (? * + {n} {n,} {n,m}, lazy forms too) right after a written
+// surrogate pair outside a class, raw (😀) or escaped (\uD83D\uDE00): JS without u repeats only the low
+// unit, RE2 the whole character, so a stored rule never matches; x(?:😀)?y is the portable spelling (camada-all-k938).
+// ok is also false for a quantifier (? * + {n} {n,} {n,m}, lazy forms too) right after a written
+// surrogate pair outside a class, raw (😀) or escaped (\uD83D\uDE00): JS without u repeats only the low
+// unit, RE2 the whole character, so refuse; x(?:😀)?y is the portable spelling (camada-all-k938).
 func jsToRE2(pattern string) (string, bool) {
 	var out strings.Builder
 	n, inClass, assertion := len(pattern), false, false
@@ -293,6 +299,9 @@ func jsToRE2(pattern string) (string, bool) {
 				continue
 			}
 			if nxt == 'u' && i+5 < n && isHex4(pattern[i+2:i+6]) {
+				if !inClass && i+12 < n && isSurrogatePair(pattern[i:i+12]) && isQuantifierAt(pattern[i+12:]) {
+					return "", false // JS repeats only the low unit, RE2 the whole character
+				}
 				out.WriteString(`\x{` + pattern[i+2:i+6] + `}`)
 				i += 6
 				continue
@@ -374,10 +383,21 @@ func jsToRE2(pattern string) (string, bool) {
 				continue
 			}
 		}
+		if !inClass && ch >= 0xF0 { // a raw astral character is a written surrogate pair
+			if _, size := utf8.DecodeRuneInString(pattern[i:]); i+size < n && isQuantifierAt(pattern[i+size:]) {
+				return "", false
+			}
+		}
 		out.WriteByte(ch)
 		i++
 	}
 	return out.String(), true
+}
+
+// isSurrogatePair reports whether s is exactly `\uD83D\uDE00`-shaped: a high then a low surrogate escape.
+func isSurrogatePair(s string) bool {
+	h, l := strings.ToUpper(s[2:6]), strings.ToUpper(s[8:12])
+	return len(s) == 12 && s[6:8] == `\u` && isHex4(l) && h >= "D800" && h <= "DBFF" && l >= "DC00" && l <= "DFFF"
 }
 
 // isOctal reports whether c is 0-7.
