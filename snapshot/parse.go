@@ -263,8 +263,32 @@ func CompileRegex(pattern string) *regexp.Regexp {
 	return rx
 }
 
+// countGroups counts the capture groups of a JS pattern: an unescaped ( outside a class, except (?: (?= (?! (?<= (?<! ; (?<name> counts.
+func countGroups(pattern string) int {
+	g, inClass := 0, false
+	for i := 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '\\':
+			i++
+		case '[':
+			inClass = true
+		case ']':
+			inClass = false
+		case '(':
+			if inClass {
+				continue
+			}
+			rest := pattern[i+1:]
+			if !strings.HasPrefix(rest, "?") || strings.HasPrefix(rest, "?<") && !strings.HasPrefix(rest, "?<=") && !strings.HasPrefix(rest, "?<!") {
+				g++
+			}
+		}
+	}
+	return g
+}
+
 // jsToRE2 translates the JS-only spellings a tenant is likely to author: `[^]` (any char) ->
-// `[\s\S]`, `[]` (empty, never matches) -> `[^\x00-\x{10FFFF}]`, `\cX` -> the control character, a bare `\c` -> `\\c`, `[\1]` -> `[\01]`, `[\8]` -> `[8]`, `\x` without two hex digits -> the letter x (as JS reads it), `\uXXXX` -> `\x{XXXX}` (RE2's code-point escape;
+// `[\s\S]`, `[]` (empty, never matches) -> `[^\x00-\x{10FFFF}]`, `\cX` -> the control character, a bare `\c` -> `\\c`, `[\1]` -> `[\01]`, `[\8]` -> `[8]`, `\8` / `\9` -> the digit when the pattern has fewer groups, `\x` without two hex digits -> the letter x (as JS reads it), `\uXXXX` -> `\x{XXXX}` (RE2's code-point escape;
 // Python's re reads `\uXXXX` natively, so the family agrees), and a quantifier bound above RE2's
 // 1000 cap (`{1,5000}`) -> the upper bound dropped when it is past MaxMatchInput, which is exact for
 // capped inputs. Anything else RE2 rejects still fails open. ok is false for a quantifier right after
@@ -313,7 +337,7 @@ func jsToRE2(pattern string) (string, bool) {
 				i += 1 + d
 				continue
 			}
-			if inClass && (nxt == '8' || nxt == '9') { // Annex B: \8 \9 in a class are the literal digit; Go rejects the escape
+			if (nxt == '8' || nxt == '9') && (inClass || int(nxt-'0') > countGroups(pattern)) { // Annex B: \8 \9 are the literal digit in a class, and outside one when the pattern has fewer groups; Go rejects the escape
 				out.WriteByte(nxt)
 				i += 2
 				continue
