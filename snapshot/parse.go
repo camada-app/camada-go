@@ -33,6 +33,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/camada-app/camada-go/internal/ipparse"
@@ -322,8 +323,15 @@ func jsToRE2(pattern string) (string, bool) {
 				continue
 			}
 			if nxt == 'u' && i+5 < n && isHex4(pattern[i+2:i+6]) {
-				if !inClass && i+12 < n && isSurrogatePair(pattern[i:i+12]) && isQuantifierAt(pattern[i+12:]) {
-					return "", false // JS repeats only the low unit, RE2 the whole character
+				if !inClass && i+12 <= n && isSurrogatePair(pattern[i:i+12]) {
+					if i+12 < n && isQuantifierAt(pattern[i+12:]) {
+						return "", false // JS repeats only the low unit, RE2 the whole character
+					}
+					h, _ := strconv.ParseUint(pattern[i+2:i+6], 16, 16)
+					l, _ := strconv.ParseUint(pattern[i+8:i+12], 16, 16)
+					fmt.Fprintf(&out, `\x{%x}`, utf16.DecodeRune(rune(h), rune(l))) // camada-all-sy8y: the pair is one code point, as in re2js
+					i += 12
+					continue
 				}
 				out.WriteString(`\x{` + pattern[i+2:i+6] + `}`)
 				i += 6
