@@ -17,7 +17,7 @@ import (
 	"github.com/camada-app/camada-go/internal/testutil"
 )
 
-const regexLimitVectorsSHA256 = "b01e86bd2bead280081f58d31f7f517131d8cafa6144b8c27fe868e3c3959d56"
+const regexLimitVectorsSHA256 = "d549b323af4ba9b863a401a474da77baee46711832d1ef4241986bafc0bffc15"
 
 const regexLimitVectors = "regex-limit/regex-limit-vectors.json"
 
@@ -74,6 +74,7 @@ type rlVectors struct {
 		Hit bool `json:"hit"`
 	} `json:"linear_time"`
 	Refused          []rlRow  `json:"refused"`
+	AstralSplit      []rlRow  `json:"astral_split"`
 	TranslateRefused []string `json:"translate_refused"`
 	Accepted         []string `json:"accepted"`
 	AcceptedMatch    []rlRow  `json:"accepted_match"`
@@ -140,7 +141,7 @@ func TestRegexLimitVectors(t *testing.T) {
 	for _, s := range []struct {
 		name string
 		rows []rlRow
-	}{{"refused", v.Refused}, {"accepted_match", v.AcceptedMatch}} {
+	}{{"refused", v.Refused}, {"astral_split", v.AstralSplit}, {"accepted_match", v.AcceptedMatch}} {
 		t.Run(s.name, func(t *testing.T) {
 			if len(s.rows) == 0 {
 				t.Fatalf("%s is empty", s.name)
