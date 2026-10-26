@@ -551,6 +551,23 @@ func TestJSClassBracketIsLiteral(t *testing.T) {
 	}
 }
 
+// camada-all-hgsn: V8 (Annex B) reads \8 and \9 in a class as the literal digits; Go rejects the escape.
+func TestJSToRE2ClassEightNine(t *testing.T) {
+	for _, c := range []struct {
+		pat  string
+		in   string
+		want bool
+	}{
+		{`x[\8]y`, "x8y", true}, {`x[\9]y`, "x9y", true}, {`x[\8]y`, "x9y", false},
+		{`x[^\8]y`, "x8y", false}, {`x[\8-\9]y`, "x9y", true}, {`x[a\8]y`, "x\\y", false},
+	} {
+		rx := CompileRegex(c.pat)
+		if rx == nil || rx.MatchString(c.in) != c.want {
+			t.Errorf("%q on %q: rx=%v, want match=%v", c.pat, c.in, rx, c.want)
+		}
+	}
+}
+
 // camada-all-pcht: a multi-byte character is one class atom (JS reads a code unit, Go a byte), so a range
 // ending in one cannot start another; a 4-byte character is a surrogate pair, whose low half is a fresh atom.
 func TestJSToRE2ClassMultiByteAtoms(t *testing.T) {
