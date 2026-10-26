@@ -587,14 +587,14 @@ func TestJSToRE2EightNineOutsideClass(t *testing.T) {
 }
 
 // camada-all-pcht: a multi-byte character is one class atom (JS reads a code unit, Go a byte), so a range
-// ending in one cannot start another; a 4-byte character is a surrogate pair, whose low half is a fresh atom.
+// ending in one cannot start another.
 func TestJSToRE2ClassMultiByteAtoms(t *testing.T) {
 	for _, p := range []string{`x[a-é-\d]y`, `x[a-ж-\w]y`, `x[a-€-\d]y`, `x[é-ж-\d]y`} {
 		if got, ok := jsToRE2(p); !ok || got != p {
 			t.Errorf("%q: got (%q, %v), want unchanged and ok", p, got, ok)
 		}
 	}
-	for _, p := range []string{`x[a-😀-\d]y`, `[é-\d]`, `[\s-é]`} {
+	for _, p := range []string{`[é-\d]`, `[\s-é]`} {
 		if _, ok := jsToRE2(p); ok {
 			t.Errorf("%q: jsToRE2 ok, want refused", p)
 		}
@@ -680,5 +680,51 @@ func TestJsToRE2ClassControlAndOctalAtoms(t *testing.T) {
 func TestJsToRE2BackreferenceOutsideClass(t *testing.T) {
 	if CompileRegex(`(a)\1`) != nil {
 		t.Error(`(a)\1: compiled, want nil`)
+	}
+}
+
+// camada-all-k938: a quantifier right after a written surrogate pair is refused (JS repeats the low
+// unit, RE2 the whole character). A pair inside [ ] is camada-all-cfx4.
+func TestJsToRE2AstralQuantifier(t *testing.T) {
+	for _, p := range []string{`x😀?y`, `x😀*?y`, `x😀{2}y`, `x😀{1,}y`, `x\uD83D\uDE00?y`, `x\ud83d\ude00{0,2}y`} {
+		if _, ok := jsToRE2(p); ok {
+			t.Errorf("%q: jsToRE2 ok, want refused", p)
+		}
+	}
+	for _, p := range []string{`x😀y`, `x😀{y`, `x😀{a}y`, `x(?:😀)?y`, `x😀|a?`, `(😀)+`} {
+		if _, ok := jsToRE2(p); !ok {
+			t.Errorf("%q: jsToRE2 refused, want ok", p)
+		}
+	}
+	// translation itself is camada-all-sy8y
+	if _, ok := jsToRE2(`\uD83D\uDE00`); !ok {
+		t.Errorf("unquantified pair refused, want ok")
+	}
+}
+
+// camada-all-cfx4: a raw astral character inside [ ] is refused (JS reads two units, RE2 one code point).
+// Escaped halves stay (every engine reads two); the outside-the-brackets spelling is the portable one.
+func TestJSToRE2AstralClass(t *testing.T) {
+	for _, p := range []string{`x[😀]y`, `x[😀]?y`, `x[a😀]y`, `x[😀a]y`, `x[a-😀]y`, `x[^😀]y`, `x[😀-😂]y`, `x[\]😀]y`, `x[[😀]y`, `[😀]`, `x[a-😀-\d]y`, `x[😀-￿]y`, `x[😀]+y`} {
+		if _, ok := jsToRE2(p); ok {
+			t.Errorf("%q: jsToRE2 ok, want refused", p)
+		}
+		if CompileRegex(p) != nil {
+			t.Errorf("%q: compiles, want nil", p)
+		}
+	}
+	for _, p := range []string{`x[a-z]y`, `x[\x41-\x5a]y`, `x[é]y`, `x[\uD83D\uDE00]y`, `x[^\uD83D\uDE00]y`, `x😀y`, `x(?:😀|a)y`, `x(?:😀)?y`, `x(?:[a-z]|😀)y`, `x\[😀]y`, `x[^]😀y`, `x[]😀y`} {
+		if _, ok := jsToRE2(p); !ok {
+			t.Errorf("%q: jsToRE2 refused, want ok", p)
+		}
+	}
+	re := CompileRegex(`x(?:😀|a)y`)
+	if re == nil {
+		t.Fatal("x(?:😀|a)y does not compile")
+	}
+	for in, want := range map[string]bool{"xy": false, "x😀y": true, "xay": true} {
+		if got := re.MatchString(in); got != want {
+			t.Errorf("x(?:😀|a)y on %q = %v, want %v", in, got, want)
+		}
 	}
 }
