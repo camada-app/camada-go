@@ -323,13 +323,11 @@ func jsToRE2(pattern string) (string, bool) {
 				continue
 			}
 			if nxt == 'u' && i+5 < n && isHex4(pattern[i+2:i+6]) {
-				if !inClass && i+12 <= n && isSurrogatePair(pattern[i:i+12]) {
+				if cp, ok := surrogatePair(pattern[i:min(i+12, n)]); ok && !inClass {
 					if i+12 < n && isQuantifierAt(pattern[i+12:]) {
 						return "", false // JS repeats only the low unit, RE2 the whole character
 					}
-					h, _ := strconv.ParseUint(pattern[i+2:i+6], 16, 16)
-					l, _ := strconv.ParseUint(pattern[i+8:i+12], 16, 16)
-					fmt.Fprintf(&out, `\x{%x}`, utf16.DecodeRune(rune(h), rune(l))) // camada-all-sy8y: the pair is one code point, as in re2js
+					fmt.Fprintf(&out, `\x{%x}`, cp) // camada-all-sy8y: the pair is one code point, as in re2js
 					i += 12
 					continue
 				}
@@ -430,14 +428,17 @@ func jsToRE2(pattern string) (string, bool) {
 	return out.String(), true
 }
 
-// isSurrogatePair reports whether s is exactly `\uD83D\uDE00`-shaped: a high then a low surrogate escape.
-func isSurrogatePair(s string) bool {
+// surrogatePair decodes s when it is exactly `\uD83D\uDE00`-shaped (a high then a low surrogate escape).
+func surrogatePair(s string) (rune, bool) {
 	if len(s) != 12 || s[6:8] != `\u` {
-		return false
+		return 0, false
 	}
 	h, err1 := strconv.ParseUint(s[2:6], 16, 16)
 	l, err2 := strconv.ParseUint(s[8:12], 16, 16)
-	return err1 == nil && err2 == nil && h >= 0xD800 && h <= 0xDBFF && l >= 0xDC00 && l <= 0xDFFF
+	if err1 != nil || err2 != nil || h < 0xD800 || h > 0xDBFF || l < 0xDC00 || l > 0xDFFF {
+		return 0, false
+	}
+	return utf16.DecodeRune(rune(h), rune(l)), true
 }
 
 // isOctal reports whether c is 0-7.
