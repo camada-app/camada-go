@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-10-26)
 
 - fix (security): a `[` inside a class is literal as in JS; `[[:alpha:]]` was read as a POSIX class, and `[[:x:]]` never matched. (camada-all-07c7)
 - fix (security): snapshot meta `pathsRegex` entries are now tested like a path `matches` rule condition: case-insensitive, a pattern this SDK refuses never matches, and a path over 2048 chars answers block. (Go has no per-request regex budget: RE2 is linear-time.) `Snapshot.PathsRegex` is now `[]func(string) bool`. (camada-all-rvuh)
