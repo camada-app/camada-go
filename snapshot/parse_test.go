@@ -696,9 +696,27 @@ func TestJsToRE2AstralQuantifier(t *testing.T) {
 			t.Errorf("%q: jsToRE2 refused, want ok", p)
 		}
 	}
-	// translation itself is camada-all-sy8y
-	if _, ok := jsToRE2(`\uD83D\uDE00`); !ok {
-		t.Errorf("unquantified pair refused, want ok")
+	// camada-all-sy8y: an unquantified escaped pair outside [ ] is its code point; inside [ ] the halves stay
+	for p, want := range map[string]string{`\uD83D\uDE00`: `\x{1f600}`, `x[\uD83D\uDE00]y`: `x[\x{D83D}\x{DE00}]y`} {
+		if got, ok := jsToRE2(p); !ok || got != want {
+			t.Errorf("jsToRE2(%q) = %q, %v; want %q", p, got, ok, want)
+		}
+	}
+	for _, c := range []struct {
+		p, in string
+		hit   bool
+	}{
+		{`x😀y`, "x😀y", true}, {`x😀y`, "xy", false},
+		{`x\uD83D\uDE00y`, "x😀y", true}, {`x\uD83D\uDE00y`, "xy", false},
+		{`x[\uD83D\uDE00]y`, "x😀y", false},
+		{`x\uD83D`, "x😀y", false}, {`\uDE00y`, "x😀y", false},
+	} {
+		re := CompileRegex(c.p)
+		if re == nil {
+			t.Errorf("%q: does not compile", c.p)
+		} else if re.MatchString(c.in) != c.hit {
+			t.Errorf("%q on %q: want %v", c.p, c.in, c.hit)
+		}
 	}
 }
 
