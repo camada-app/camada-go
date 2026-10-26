@@ -572,7 +572,7 @@ func TestJSToRE2ClassEightNine(t *testing.T) {
 func TestJSToRE2EightNineOutsideClass(t *testing.T) {
 	for _, c := range []struct{ pat, in string }{
 		{`x\8y`, "x8y"}, {`x\9y`, "x9y"}, {`(a)x\8y`, "ax8y"}, {`(?:a)(?:b)x\8y`, "abx8y"},
-		{`(a)(b)(c)(d)(e)(f)(g)(?:h)\8`, "abcdefgh8"},		{`(a)(b)(c)(d)(e)(f)(g)[(]\8`, "abcdefg(8"}, {`(a)(b)(c)(d)(e)(f)(g)\(\8`, "abcdefg(8"},
+		{`(a)(b)(c)(d)(e)(f)(g)(?:h)\8`, "abcdefgh8"}, {`(a)(b)(c)(d)(e)(f)(g)[(]\8`, "abcdefg(8"}, {`(a)(b)(c)(d)(e)(f)(g)\(\8`, "abcdefg(8"},
 	} {
 		if rx := CompileRegex(c.pat); rx == nil || !rx.MatchString(c.in) {
 			t.Errorf("%q on %q: rx=%v, want match", c.pat, c.in, rx)
