@@ -571,13 +571,15 @@ func TestJSToRE2ClassEightNine(t *testing.T) {
 // camada-all-zffr: outside a class V8 reads \8 \9 as a backreference only with that many groups, else the digit.
 func TestJSToRE2EightNineOutsideClass(t *testing.T) {
 	for _, c := range []struct{ pat, in string }{
-		{`x\8y`, "x8y"}, {`x\9y`, "x9y"}, {`(a)x\8y`, "ax8y"}, {`(?:a)(?:b)x\8y`, "abx8y"}, {`[(](a)x\9y`, "(ax9y"},
+		{`x\8y`, "x8y"}, {`x\9y`, "x9y"}, {`(a)x\8y`, "ax8y"}, {`(?:a)(?:b)x\8y`, "abx8y"},
+		{`(a)(b)(c)(d)(e)(f)(g)(?:h)\8`, "abcdefgh8"}, {`(a)(b)(c)(d)(e)(f)(g)(?<=g)\8`, "abcdefg8"},
+		{`(a)(b)(c)(d)(e)(f)(g)[(]\8`, "abcdefg(8"}, {`(a)(b)(c)(d)(e)(f)(g)\(\8`, "abcdefg(8"},
 	} {
 		if rx := CompileRegex(c.pat); rx == nil || !rx.MatchString(c.in) {
 			t.Errorf("%q on %q: rx=%v, want match", c.pat, c.in, rx)
 		}
 	}
-	if rx := CompileRegex(`x\8y`); rx.MatchString("x9y") {
+	if rx := CompileRegex(`x\8y`); rx == nil || rx.MatchString("x9y") {
 		t.Error(`x\8y matched x9y`)
 	}
 	if CompileRegex(`(a)(b)(c)(d)(e)(f)(g)(h)\8`) != nil || CompileRegex(`(a)(b)(c)(d)(e)(f)(g)(?<n>h)\8`) != nil {
