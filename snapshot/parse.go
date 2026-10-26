@@ -290,7 +290,7 @@ func countGroups(pattern string) int {
 
 // jsToRE2 translates the JS-only spellings a tenant is likely to author: `[^]` (any char) ->
 // `[\s\S]`, `[]` (empty, never matches) -> `[^\x00-\x{10FFFF}]`, `\cX` -> the control character, a bare `\c` -> `\\c`, `[\1]` -> `[\01]`, `[\8]` -> `[8]`, `\8` / `\9` -> the digit when the pattern has fewer groups, `\x` without two hex digits -> the letter x (as JS reads it), `\uXXXX` -> `\x{XXXX}` (RE2's code-point escape;
-// Python's re reads `\uXXXX` natively, so the family agrees), and a quantifier bound above RE2's
+// Python's re reads `\uXXXX` natively, so the family agrees; an unquantified escaped surrogate pair outside a class -> its code point, `\x{1f600}` (camada-all-sy8y), a quantified one is refused (k938), and inside [ ] the halves stay separate (cfx4)), and a quantifier bound above RE2's
 // 1000 cap (`{1,5000}`) -> the upper bound dropped when it is past MaxMatchInput, which is exact for
 // capped inputs. Anything else RE2 rejects still fails open. ok is false for a quantifier right after
 // ^ $ \b \B: JS throws on it, RE2 would accept it (`^{1,5000}` would even clamp to a bare `^`).
@@ -323,13 +323,15 @@ func jsToRE2(pattern string) (string, bool) {
 				continue
 			}
 			if nxt == 'u' && i+5 < n && isHex4(pattern[i+2:i+6]) {
-				if cp, ok := surrogatePair(pattern[i:min(i+12, n)]); ok && !inClass {
-					if i+12 < n && isQuantifierAt(pattern[i+12:]) {
-						return "", false // JS repeats only the low unit, RE2 the whole character
+				if cp, ok := rune(0), false; !inClass {
+					if cp, ok = surrogatePair(pattern[i:min(i+12, n)]); ok {
+						if i+12 < n && isQuantifierAt(pattern[i+12:]) {
+							return "", false // JS repeats only the low unit, RE2 the whole character
+						}
+						fmt.Fprintf(&out, `\x{%x}`, cp) // camada-all-sy8y: the pair is one code point, as in re2js
+						i += 12
+						continue
 					}
-					fmt.Fprintf(&out, `\x{%x}`, cp) // camada-all-sy8y: the pair is one code point, as in re2js
-					i += 12
-					continue
 				}
 				out.WriteString(`\x{` + pattern[i+2:i+6] + `}`)
 				i += 6
