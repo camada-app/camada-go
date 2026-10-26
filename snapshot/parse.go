@@ -264,7 +264,7 @@ func CompileRegex(pattern string) *regexp.Regexp {
 }
 
 // jsToRE2 translates the JS-only spellings a tenant is likely to author: `[^]` (any char) ->
-// `[\s\S]`, `[]` (empty, never matches) -> `[^\x00-\x{10FFFF}]`, `\cX` -> the control character, a bare `\c` -> `\\c`, `[\1]` -> `[\01]`, `[\8]` -> `[8]`,`\x` without two hex digits -> the letter x (as JS reads it), `\uXXXX` -> `\x{XXXX}` (RE2's code-point escape;
+// `[\s\S]`, `[]` (empty, never matches) -> `[^\x00-\x{10FFFF}]`, `\cX` -> the control character, a bare `\c` -> `\\c`, `[\1]` -> `[\01]`, `[\8]` -> `[8]`, `\x` without two hex digits -> the letter x (as JS reads it), `\uXXXX` -> `\x{XXXX}` (RE2's code-point escape;
 // Python's re reads `\uXXXX` natively, so the family agrees), and a quantifier bound above RE2's
 // 1000 cap (`{1,5000}`) -> the upper bound dropped when it is past MaxMatchInput, which is exact for
 // capped inputs. Anything else RE2 rejects still fails open. ok is false for a quantifier right after
