@@ -3,13 +3,21 @@
 camada for Go: enforces the tenant snapshot inline (your ordered custom rules, then allow,
 block, challenge), serves a first-party proof-of-work challenge page and beacon, records the
 outcomes your handlers know (`Track`), and ships wire events in batches off the request path.
-One module, one public package, a `net/http` middleware — `http.ListenAndServe(":8080",
-camada.Handler(mux))` — that any router built on `http.Handler` sits behind. Fails open by
+One module, one public package, and a `net/http` middleware (`http.ListenAndServe(":8080",
+camada.Handler(mux))`) that any router built on `http.Handler` sits behind. Fails open by
 design: a camada outage or bug never 5xxes your app.
 
-Not yet tagged — use it from a sibling checkout with a `replace` directive, as
-[`camada-go-example`](https://github.com/camada-app/camada-go-example) does; publishing is one decision with the npm
-packages (SDK-G01). Go 1.23 or newer, no dependencies outside the standard library.
+Install with `go get github.com/camada-app/camada-go`. Go 1.23 or newer, with no dependencies
+outside the standard library. For local SDK work, point a `replace` directive at a sibling
+checkout, as [`camada-go-example`](https://github.com/camada-app/camada-go-example) does.
+
+## Documentation
+
+- [Go SDK guide](https://www.camada.app/docs/go): options, `net/http` wiring, and trusted-proxy rules.
+- [Go quickstart](https://www.camada.app/docs/quickstart/go): install and mount `camada.Handler` in two lines.
+- [In-app bot detection](https://www.camada.app/bot-detection): how camada stops credential stuffing, fake signups, and scrapers.
+- [Test your bot signals](https://www.camada.app/tools/bot-test): live browser, HTTP, and TLS signal inspector.
+- [Docs](https://www.camada.app/docs) and [Pricing](https://www.camada.app/pricing): full reference and plan limits.
 
 ## Quickstart
 
@@ -33,7 +41,7 @@ first request. That build starts the snapshot poll on a goroutine and never bloc
 request that triggered it is answered cold: it passes (fail open), and so does anything else
 that arrives before that first poll lands (a few hundred milliseconds against a local analyst;
 snapshot-size and network bound). To enforce from request 1, build the engine eagerly at startup
-and wait for the boot poll — `Snap.Refresh()` alone is not it, the boot poll already holds the
+and wait for the boot poll. `Snap.Refresh()` alone is not it, because the boot poll already holds the
 single-in-flight lock:
 
 ```go
@@ -64,11 +72,11 @@ http.ListenAndServe(":8080", cam.Handler(mux))
    the wire. `CAMADA_SERVERLESS=1` drops the poll goroutine: each request checks staleness, and a
    stale one kicks a single refresh off the request path.
    Every poll and event batch carries `x-camada-sdk: @camada/go/<version>`, and polls ask for
-   snapshot v5 (`x-camada-snapshot: 5`) — the container that carries your ordered custom rules.
+   snapshot v5 (`x-camada-snapshot: 5`), the container that carries your ordered custom rules.
 2. Resolves the client from the socket peer (`r.RemoteAddr`), combined with `X-Forwarded-For`
    only under your tenant's trusted-proxy config (or `CAMADA_TRUSTED_PROXY` locally). A forwarded
-   header on its own is never the ip: any caller can set it. Nothing needs disabling for proxies —
-   `net/http` itself never rewrites the peer — so a reverse proxy in front of the app is declared, not
+   header on its own is never the ip: any caller can set it. Nothing needs disabling for proxies
+   (`net/http` itself never rewrites the peer), so a reverse proxy in front of the app is declared, not
    inferred. Entries may carry a port (`ip:port`, `[v6]:port`, as Azure Application Gateway writes
    them) or the `::ffff:a.b.c.d` form, and are trimmed of spaces and tabs only. The resolved ip is
    always a valid address or none. Under `cidrs` (and the dashboard's Cloudflare option, stored as
@@ -149,7 +157,7 @@ camada.Track(r, "login_failed", email)   // "" when there is no identifier
 
 The identifier is HMAC-hashed in-process with your ingest token; the raw value never reaches the
 queue. `Track` never panics. Outside the middleware (a request it did not run for) the outcome
-still ships, with no `rid`/`sid`/`ip` to join on — and it builds the default engine if nothing
+still ships, with no `rid`/`sid`/`ip` to join on, and it builds the default engine if nothing
 has yet. The event name is free-form; the analyst's app-context rules read this vocabulary:
 
 | event | when |
@@ -171,9 +179,9 @@ non-HTML request also gets false: it is signalled (`x-camada-challenge: 1`, `no-
 `sdk-go` is an in-app tap: status, latency, session, route pattern, the beacon's browser
 signals and your outcomes. `net/http` parses headers into a map, so the event's header order
 (`hord`) is the sorted name list, not the wire's. camada resolves ASN and country itself. Enforcement at this position covers ip, path, user-agent and
-header conditions — ASN, country and TLS entries fail open in-app. `matches` patterns are JS
+header conditions: ASN, country and TLS entries fail open in-app. `matches` patterns are JS
 regexes read by Go's RE2 (`(?<name>` is native, `[^]` and `\cX` are translated, `\d`/`\w`/`\b`
-are ASCII as JS reads them); a spelling RE2 rejects — lookaround, backreferences — never matches
+are ASCII as JS reads them); a spelling RE2 rejects (lookaround, backreferences) never matches
 here, while it does at the edge.
 
 Not yet in this SDK: the TLS fingerprint (`ja4`). A Go server terminating TLS itself could read
@@ -185,7 +193,7 @@ field, always empty, until that lands.
 - Every process polls its own snapshot (about 5 MB resident) and flushes its own batches; the
   tenant's `poll_seconds` keeps the cadence honest across a fleet.
 - Pending events drain when you call `Stop` (`defer cam.Stop(ctx)` in `main`), within half a
-  second. No signal handlers are installed — an app owns its own shutdown — so a process killed
+  second. No signal handlers are installed (an app owns its own shutdown), so a process killed
   without one drops its last batch.
 - Serverless: `CAMADA_SERVERLESS=1`. A cold invocation fails open and catches up on the next one.
 - Behind a reverse proxy or load balancer, declare it: `CAMADA_TRUSTED_PROXY=hops:1` (or the

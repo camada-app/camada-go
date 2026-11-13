@@ -2,6 +2,11 @@
 // rules, then allow, block, challenge), a first-party proof-of-work challenge and beacon,
 // app-context events, and batched wire events shipped off the request path. Fails open by design.
 //
+// Documentation: https://www.camada.app/docs/go
+// Quickstart: https://www.camada.app/docs/quickstart/go
+// In-app bot detection: https://www.camada.app/bot-detection
+// Bot signal test: https://www.camada.app/tools/bot-test
+//
 // Quickstart (env: CAMADA_KEY, plus CAMADA_INGEST_URL in dev):
 //
 //	mux := http.NewServeMux()
