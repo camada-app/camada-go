@@ -29,4 +29,4 @@ const (
 
 // Row keys only the SDK can attest (TLS/network facts, outcome, session, track()). A beacon body is the
 // visitor's, so these never ride a sig:1 row; the analyst joins them from the beacon's request row.
-var requestRowKeys = [...]string{"tlsx", "ja4", "asn", "cc", "sid", "ns", "st", "dur", "rt", "blk", "rl", "wrn", "chs", "ch", "et", "uid"}
+var requestRowKeys = [...]string{"tlsx", "ja4", "asn", "cc", "sid", "ns", "st", "dur", "rt", "blk", "rl", "wrn", "chs", "ch", "et", "uid", "tk", "bf", "upf"}

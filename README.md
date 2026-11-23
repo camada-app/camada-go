@@ -131,6 +131,8 @@ http.ListenAndServe(":8080", cam.Handler(mux))
 | `Refresh` | server-steered | poll cadence; set, it is pinned |
 | `Challenge` | `nil` (= true) | serve the proof-of-work page for challenge verdicts (`CAMADA_CHALLENGE=0` too) |
 | `ChallengePath` | `/__camada/challenge` | where the page posts its solution |
+| `TokenHash` | `nil` | enable credential hashing, or defer to `CAMADA_TOKEN_HASH` |
+| `TokenHeader` | empty | extra credential header, or defer to `CAMADA_TOKEN_HEADER` |
 | `SnapshotVersion` | `5` | 4 drops your custom rules; 3 the allow/challenge sides too |
 | `ScriptPath` / `FPPath` | `/_cam/b.js` / `/_cam/fp` | the beacon endpoints; keep them in one directory |
 
@@ -138,6 +140,19 @@ Env: `CAMADA_KEY` (or `CAMADA_TOKEN` + `CAMADA_SNAPSHOT_TOKEN`), `CAMADA_INGEST_
 `CAMADA_SNAPSHOT_URL`, `CAMADA_TRUSTED_PROXY` (`none | vercel | hops:N | cidrs:a,b`),
 `CAMADA_SERVERLESS=1`, `CAMADA_CHALLENGE=0`, and the kill switch `CAMADA_DISABLED=1` (checked per
 request; set at boot, no goroutines start at all).
+
+### Credential hashing
+
+Set `Options.TokenHash` to a pointer to `true` or set `CAMADA_TOKEN_HASH=1` to opt in. A pointer
+to `false` overrides the environment. Use `Options.TokenHeader` or `CAMADA_TOKEN_HEADER` for a
+dedicated header such as `X-API-Key`. The SDK tries that header before `Authorization` and uses
+the first value of each header that net/http reports.
+
+Request rows carry `tk` as the first 32 lowercase hex characters of an HMAC-SHA256 over the
+credential prefixed with `tok:`, keyed by the ingest token. The hashing step never sends the
+credential value. The field is absent when hashing is off or no usable credential is available.
+Enable this only for random tokens or API keys. Keep it off for human passwords sent over Basic
+authentication.
 
 ## The first-party beacon
 

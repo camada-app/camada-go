@@ -6,8 +6,10 @@ package camada
 // and challenge suites).
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,8 +19,12 @@ import (
 	"time"
 
 	"github.com/camada-app/camada-go/challenge"
+	"github.com/camada-app/camada-go/internal/guarded"
+	"github.com/camada-app/camada-go/internal/redact"
 	"github.com/camada-app/camada-go/internal/testutil"
 )
+
+const fakeCredential = "fake-token-0001-not-a-real-credential"
 
 func shortCtx() context.Context {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
@@ -278,19 +284,108 @@ func TestAnAppPanicShipsSt500AndPropagates(t *testing.T) {
 	}
 }
 
+func TestTokenHashOnRequestRows(t *testing.T) {
+	enabled := true
+	wantHash := redact.HashToken(fakeCredential, "tok-test")
+	for _, mode := range []struct {
+		name   string
+		opts   hostOpts
+		hash   string
+		panics bool
+	}{
+		{name: "off"},
+		{name: "on", opts: hostOpts{opts: Options{TokenHash: &enabled}}, hash: wantHash},
+		{name: "hasher panic", opts: hostOpts{env: map[string]string{"CAMADA_TOKEN_HASH": "1"}}, panics: true},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			h := newHost(t, v4(t), mode.opts)
+			hashCalls := 0
+			if mode.panics {
+				h.engine.token.Hash = func(value string) string {
+					hashCalls++
+					panic(value)
+				}
+			}
+			auth := [][2]string{{"Authorization", "Bearer " + fakeCredential}}
+			finish := h.call(call{path: "/finish", headers: auth})
+			block := h.call(call{path: "/block", peer: testutil.BlockedIP, headers: auth})
+			if finish.status != 200 || finish.body != "hello" || block.status != 403 || block.header("x-block-reason") != "ip4" || len(h.seen) != 1 {
+				t.Fatalf("finish = %+v, block = %+v, app calls = %d", finish, block, len(h.seen))
+			}
+			wantPaths := []string{"/finish", "/block"}
+			wantStatuses := []float64{200, 403}
+			if mode.hash != "" {
+				page := h.call(call{path: "/challenge", peer: testutil.ChallengedIP, headers: append(auth, htmlNav...)})
+				if page.status != 403 || page.header("x-camada-challenge") != "1" {
+					t.Fatalf("challenge status = %d, headers = %v", page.status, page.headers)
+				}
+				nonce := nonceOf(t, page.body)
+				verify := h.call(call{method: "POST", path: ChallengePath, peer: testutil.ChallengedIP, headers: auth,
+					body: "nonce=" + nonce + "&solution=" + testutil.Solve(nonce) + "&to=%2F"})
+				if verify.status != 302 {
+					t.Fatalf("verify status = %d", verify.status)
+				}
+				wantPaths = append(wantPaths, "/challenge", ChallengePath)
+				wantStatuses = append(wantStatuses, 403, 200)
+			}
+			rows := h.events()
+			if len(rows) != len(wantPaths) {
+				t.Fatalf("rows = %v", rows)
+			}
+			for i, row := range rows {
+				if row["p"] != wantPaths[i] || row["st"] != wantStatuses[i] {
+					t.Fatalf("row %d = %v", i, row)
+				}
+				got, present := row["tk"]
+				if present != (mode.hash != "") || (present && got != mode.hash) {
+					t.Errorf("row %d tk = %v (present = %t), want hash %q", i, got, present, mode.hash)
+				}
+			}
+			if mode.panics && hashCalls != 2 {
+				t.Errorf("hasher calls = %d, want 2", hashCalls)
+			}
+		})
+	}
+}
+
+func TestInvalidTokenHeaderWarnsOnceWithoutTheName(t *testing.T) {
+	var buf bytes.Buffer
+	SetLogger(log.New(&buf, "", 0))
+	guarded.Reset()
+	t.Cleanup(func() {
+		SetLogger(log.Default())
+		guarded.Reset()
+	})
+	for _, header := range []string{"X_Invalid-Header", "Authorization"} {
+		engineWith(t, testutil.NewFakeAnalyst(t), nil, Options{TokenHeader: header})
+	}
+	if got := buf.String(); strings.Count(got, "\n") != 1 || !strings.Contains(got, "[camada] warning:") ||
+		strings.Contains(got, "X_Invalid-Header") || strings.Contains(got, "Authorization") {
+		t.Fatalf("warnings = %q", got)
+	}
+}
+
 // ---- track ----
 
 func TestTrackShipsAnAppContextEventWithAHashedUID(t *testing.T) {
-	h := newHost(t, testutil.NewFakeAnalyst(t), hostOpts{handler: func(w http.ResponseWriter, r *http.Request) {
-		Track(r, "login_failed", "alice@example.com")
-		w.WriteHeader(401)
-	}})
-	r := h.call(call{method: "POST", path: "/login", body: "x=1"})
+	h := newHost(t, testutil.NewFakeAnalyst(t), hostOpts{
+		env: map[string]string{"CAMADA_TOKEN_HASH": "1", "CAMADA_TOKEN_HEADER": "X-API-Key"},
+		handler: func(w http.ResponseWriter, r *http.Request) {
+			Track(r, "login_failed", "alice@example.com")
+			w.WriteHeader(401)
+		},
+	})
+	r := h.call(call{method: "POST", path: "/login", headers: [][2]string{{"X-API-Key", fakeCredential}}, body: "x=1"})
 	evs := h.events()
+	if len(evs) != 2 {
+		t.Fatalf("rows = %v", evs)
+	}
 	var tracked map[string]any
 	for _, e := range evs {
 		if e["et"] != nil {
 			tracked = e
+		} else if e["tk"] != redact.HashToken(fakeCredential, "tok-test") {
+			t.Errorf("request row tk = %v", e["tk"])
 		}
 	}
 	if tracked == nil || tracked["et"] != "login_failed" || tracked["tap"] != "sdk-go" || tracked["rid"] != r.header("x-rid") {
@@ -307,6 +402,9 @@ func TestTrackShipsAnAppContextEventWithAHashedUID(t *testing.T) {
 	}
 	if _, ok := tracked["p"]; ok {
 		t.Fatal("a track row is not a page row")
+	}
+	if _, ok := tracked["tk"]; ok {
+		t.Fatal("tk on a track row")
 	}
 }
 
@@ -350,13 +448,13 @@ func TestServesTheScriptAndBatchesFPAsASigRowWithTheResolvedIP(t *testing.T) {
 func TestStripsSDKAttestedKeysAVisitorPutsInTheBeaconBody(t *testing.T) {
 	a := testutil.NewFakeAnalyst(t)
 	hops1(a)
-	h := newHost(t, a, hostOpts{})
+	h := newHost(t, a, hostOpts{env: map[string]string{"CAMADA_TOKEN_HASH": "1"}})
 	forged := map[string]any{"rid": "r-1", "tz": "UTC"}
-	keys := []string{"tlsx", "ja4", "asn", "cc", "sid", "ns", "st", "dur", "rt", "blk", "rl", "wrn", "chs", "ch", "et", "uid"}
+	keys := []string{"tlsx", "ja4", "asn", "cc", "sid", "ns", "st", "dur", "rt", "blk", "rl", "wrn", "chs", "ch", "et", "uid", "tk", "bf", "upf"}
 	for _, k := range keys {
 		forged[k] = "forged"
 	}
-	fp := h.call(call{method: "POST", path: "/_cam/fp", headers: [][2]string{{"x-forwarded-for", "198.18.0.5"}, {"content-type", "application/json"}}, body: jsonOf(t, forged)})
+	fp := h.call(call{method: "POST", path: "/_cam/fp", headers: [][2]string{{"x-forwarded-for", "198.18.0.5"}, {"content-type", "application/json"}, {"Authorization", "Bearer " + fakeCredential}}, body: jsonOf(t, forged)})
 	if fp.status != 204 {
 		t.Fatalf("%+v", fp)
 	}

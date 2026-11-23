@@ -128,3 +128,30 @@ func TestRefererShipsWithItsQueryScrubbed(t *testing.T) {
 		t.Fatalf("no Referer: ref = %#v", ev["ref"])
 	}
 }
+
+func TestTokenUsesTheFirstValuePerHeader(t *testing.T) {
+	info := req([]Header{
+		{"X-API-Key", "short"},
+		{"x-api-key", "second-api-key"},
+		{"Authorization", "Bearer first-fake-token"},
+		{"authorization", "Bearer second-fake-token"},
+	}, "", "")
+	var credential string
+	info.Token = &Token{Header: "x-api-key", Hash: func(value string) string {
+		credential = value
+		return strings.Repeat("a", 32)
+	}}
+	ev := BuildWireEvent(info, "sdk-go", "r", "", false, "")
+	if credential != "first-fake-token" || ev["tk"] != strings.Repeat("a", 32) {
+		t.Fatalf("credential = %q, tk = %v", credential, ev["tk"])
+	}
+}
+
+func TestTokenHasherPanicKeepsTheRequestRow(t *testing.T) {
+	info := req([]Header{{"Authorization", "Bearer fake-token"}}, "", "")
+	info.Token = &Token{Hash: func(value string) string { panic(value) }}
+	ev := BuildWireEvent(info, "sdk-go", "r", "", false, "")
+	if _, ok := ev["tk"]; ok || ev["rid"] != "r" || ev["auth"] != "Bearer" {
+		t.Fatalf("row = %v", ev)
+	}
+}

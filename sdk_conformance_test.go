@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/camada-app/camada-go/events"
+	"github.com/camada-app/camada-go/internal/config"
+	"github.com/camada-app/camada-go/internal/redact"
 	"github.com/camada-app/camada-go/internal/testutil"
 )
 
@@ -105,6 +107,59 @@ func TestConformanceQueryRedaction(t *testing.T) {
 				t.Errorf("q = %#v want %#v", ev["q"], c.Q)
 			}
 			assertAbsent(t, ev, c.Absent)
+		})
+	}
+}
+
+func TestConformanceTokenHash(t *testing.T) {
+	var fx struct {
+		Version int `json:"version"`
+		Cases   []struct {
+			ID          string            `json:"id"`
+			Key         string            `json:"key"`
+			TokenHeader string            `json:"tokenHeader"`
+			Headers     map[string]string `json:"headers"`
+			Credential  *string           `json:"credential"`
+			TK          *string           `json:"tk"`
+		} `json:"cases"`
+	}
+	testutil.ReadJSON(t, "redact/token.json", &fx)
+	if fx.Version != 1 || len(fx.Cases) != 22 {
+		t.Fatalf("redact/token.json: version %d, %d cases", fx.Version, len(fx.Cases))
+	}
+	for _, c := range fx.Cases {
+		t.Run(c.ID, func(t *testing.T) {
+			header, valid := config.ResolveTokenHeader(c.TokenHeader, "")
+			if !valid {
+				t.Fatal("invalid fixture token header")
+			}
+			wantCredential := ""
+			if c.Credential != nil {
+				wantCredential = *c.Credential
+			}
+			if got, ok := redact.SelectCredential(c.Headers, header); got != wantCredential || ok != (c.Credential != nil) {
+				t.Errorf("credential = %q (present = %t), want %q", got, ok, wantCredential)
+			}
+
+			info := events.RequestInfo{Method: "GET", Host: "x.test", Path: "/api/me"}
+			for name, value := range c.Headers {
+				info.Headers = append(info.Headers, events.Header{Name: name, Value: value})
+			}
+			info.Token = &events.Token{Header: header, Hash: func(value string) string {
+				return redact.HashToken(value, c.Key)
+			}}
+			ev := events.BuildWireEvent(info, "sdk-go", "r", "", false, "")
+			got, present := ev["tk"]
+			if c.TK == nil {
+				if present {
+					t.Errorf("tk = %#v, want key absent", got)
+				}
+			} else {
+				if got != *c.TK {
+					t.Errorf("tk = %#v, want %q", got, *c.TK)
+				}
+				assertAbsent(t, ev, []string{wantCredential})
+			}
 		})
 	}
 }

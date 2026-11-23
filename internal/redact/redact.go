@@ -206,10 +206,59 @@ func BodyShape(obj any) map[string]int {
 	return out
 }
 
+var schemeRE = regexp.MustCompile("^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,16}$")
+
+// AuthScheme returns the scheme prefix of an Authorization value, if present.
+func AuthScheme(value string) string {
+	sp := strings.IndexByte(value, ' ')
+	if sp > 0 && schemeRE.MatchString(value[:sp]) {
+		return value[:sp]
+	}
+	return ""
+}
+
+// SelectCredential tries the configured extra header before Authorization.
+func SelectCredential(first map[string]string, tokenHeader string) (string, bool) {
+	if tokenHeader != "" {
+		if v := credential(first[tokenHeader], false); v != "" {
+			return v, true
+		}
+	}
+	v := credential(first["authorization"], true)
+	return v, v != ""
+}
+
+func credential(value string, schemeSplit bool) string {
+	v := strings.Trim(value, " \t")
+	if schemeSplit {
+		if scheme := AuthScheme(v); scheme != "" {
+			v = strings.TrimLeft(v[len(scheme)+1:], " \t")
+		}
+	}
+	for i := 0; i < len(v); i++ {
+		if v[i] < 0x20 || v[i] > 0x7e {
+			return ""
+		}
+	}
+	if len(v) < 8 {
+		return ""
+	}
+	return v
+}
+
 // HashUserID is a stable per-tenant pseudonym: HMAC-SHA256 keyed by the ingest token, labelled so
 // the hash can never double as anything else, truncated to 32 hex chars. The raw identifier never leaves.
 func HashUserID(userID, ingestToken string) string {
+	return hashPseudonym("uid:"+userID, ingestToken)
+}
+
+// HashToken is the 32-hex, ingest-token-keyed HMAC of the credential with the tok: prefix.
+func HashToken(credential, ingestToken string) string {
+	return hashPseudonym("tok:"+credential, ingestToken)
+}
+
+func hashPseudonym(message, ingestToken string) string {
 	m := hmac.New(sha256.New, []byte(ingestToken))
-	m.Write([]byte("uid:" + userID))
-	return hex.EncodeToString(m.Sum(nil))[:32]
+	m.Write([]byte(message))
+	return hex.EncodeToString(m.Sum(nil)[:16])
 }
