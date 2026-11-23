@@ -53,14 +53,7 @@ type RequestInfo struct {
 // AuthScheme is the auth scheme of an Authorization value, never the credential.
 // Only a real auth-scheme token followed by a space ever ships.
 func AuthScheme(value string) string {
-	sp := strings.IndexByte(value, ' ')
-	if sp <= 0 {
-		return ""
-	}
-	if scheme := value[:sp]; redact.SchemeRE.MatchString(scheme) {
-		return scheme
-	}
-	return ""
+	return redact.AuthScheme(value)
 }
 
 // NowMS is the wire timestamp: milliseconds since the epoch.
@@ -163,17 +156,8 @@ func BuildWireEvent(r RequestInfo, tap, rid, sid string, newSession bool, ja4 st
 
 func addTokenHash(ev map[string]any, first map[string]string, token *Token) {
 	defer func() { _ = recover() }() // a panic must neither drop the row nor undo an enforcement decision
-	if token.Hash == nil {
-		return
-	}
-	var credential string
-	if token.Header != "" {
-		credential = redact.Credential(first[token.Header], false)
-	}
-	if credential == "" {
-		credential = redact.Credential(first["authorization"], true)
-	}
-	if credential == "" {
+	credential, ok := redact.SelectCredential(first, token.Header)
+	if !ok {
 		return
 	}
 	if hashed := token.Hash(credential); hashed != "" {

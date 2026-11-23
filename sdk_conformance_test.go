@@ -11,6 +11,7 @@ import (
 
 	"github.com/camada-app/camada-go/events"
 	"github.com/camada-app/camada-go/internal/config"
+	"github.com/camada-app/camada-go/internal/redact"
 	"github.com/camada-app/camada-go/internal/testutil"
 )
 
@@ -136,29 +137,18 @@ func TestConformanceTokenHash(t *testing.T) {
 			if c.Credential != nil {
 				wantCredential = *c.Credential
 			}
-			if len(c.Headers) <= 1 {
-				name := header
-				if _, present := c.Headers[name]; !present {
-					name = "authorization"
-				}
-				if got := Credential(c.Headers[name], name == "authorization"); got != wantCredential {
-					t.Errorf("credential = %q, want %q", got, wantCredential)
-				}
+			if got, ok := redact.SelectCredential(c.Headers, header); got != wantCredential || ok != (c.Credential != nil) {
+				t.Errorf("credential = %q (present = %t), want %q", got, ok, wantCredential)
 			}
 
 			info := events.RequestInfo{Method: "GET", Host: "x.test", Path: "/api/me"}
 			for name, value := range c.Headers {
 				info.Headers = append(info.Headers, events.Header{Name: name, Value: value})
 			}
-			var hashed string
 			info.Token = &events.Token{Header: header, Hash: func(value string) string {
-				hashed = value
-				return HashToken(value, c.Key)
+				return redact.HashToken(value, c.Key)
 			}}
 			ev := events.BuildWireEvent(info, "sdk-go", "r", "", false, "")
-			if hashed != wantCredential {
-				t.Errorf("builder hashed %q, want %q", hashed, wantCredential)
-			}
 			got, present := ev["tk"]
 			if c.TK == nil {
 				if present {

@@ -15,12 +15,3 @@ func BodyShape(obj any) map[string]int { return redact.BodyShape(obj) }
 
 // HashUserID is the per-tenant pseudonym track() ships: HMAC-SHA256 under the ingest token, 32 hex chars.
 func HashUserID(userID, ingestToken string) string { return redact.HashUserID(userID, ingestToken) }
-
-// Credential extracts a printable ASCII credential of at least eight bytes, or returns "".
-// Pass schemeSplit for Authorization values to remove a leading auth scheme when present.
-func Credential(value string, schemeSplit bool) string { return redact.Credential(value, schemeSplit) }
-
-// HashToken is the request credential pseudonym: HMAC-SHA256 under the ingest token, 32 hex chars.
-func HashToken(credential, ingestToken string) string {
-	return redact.HashToken(credential, ingestToken)
-}

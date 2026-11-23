@@ -20,6 +20,7 @@ import (
 
 	"github.com/camada-app/camada-go/challenge"
 	"github.com/camada-app/camada-go/internal/guarded"
+	"github.com/camada-app/camada-go/internal/redact"
 	"github.com/camada-app/camada-go/internal/testutil"
 )
 
@@ -285,7 +286,7 @@ func TestAnAppPanicShipsSt500AndPropagates(t *testing.T) {
 
 func TestTokenHashOnRequestRows(t *testing.T) {
 	enabled := true
-	wantHash := HashToken(fakeCredential, "tok-test")
+	wantHash := redact.HashToken(fakeCredential, "tok-test")
 	for _, mode := range []struct {
 		name   string
 		opts   hostOpts
@@ -300,7 +301,7 @@ func TestTokenHashOnRequestRows(t *testing.T) {
 			h := newHost(t, v4(t), mode.opts)
 			hashCalls := 0
 			if mode.panics {
-				h.engine.tokenHasher = func(value string) string {
+				h.engine.token.Hash = func(value string) string {
 					hashCalls++
 					panic(value)
 				}
@@ -383,7 +384,7 @@ func TestTrackShipsAnAppContextEventWithAHashedUID(t *testing.T) {
 	for _, e := range evs {
 		if e["et"] != nil {
 			tracked = e
-		} else if e["tk"] != HashToken(fakeCredential, "tok-test") {
+		} else if e["tk"] != redact.HashToken(fakeCredential, "tok-test") {
 			t.Errorf("request row tk = %v", e["tk"])
 		}
 	}

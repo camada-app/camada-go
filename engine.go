@@ -38,6 +38,7 @@ import (
 	"github.com/camada-app/camada-go/internal/beacon"
 	"github.com/camada-app/camada-go/internal/config"
 	"github.com/camada-app/camada-go/internal/guarded"
+	"github.com/camada-app/camada-go/internal/redact"
 	"github.com/camada-app/camada-go/snapshot"
 )
 
@@ -165,8 +166,7 @@ type Camada struct {
 
 	getenv      func(string) string
 	challengeOn bool
-	tokenHeader string
-	tokenHasher func(string) string
+	token       *events.Token
 	decide      func(req *Req, body []byte) (*Answer, *Passed)
 }
 
@@ -205,10 +205,12 @@ func New(o Options) *Camada {
 	if !valid {
 		guarded.WarnRateLimited("ignoring the extra token header because its name is invalid or forbidden")
 	}
-	c.tokenHeader = tokenHeader
 	if config.ResolveTokenHash(o.TokenHash, getenv("CAMADA_TOKEN_HASH")) {
 		ingestToken := c.Env.IngestToken
-		c.tokenHasher = func(credential string) string { return HashToken(credential, ingestToken) }
+		c.token = &events.Token{
+			Header: tokenHeader,
+			Hash:   func(credential string) string { return redact.HashToken(credential, ingestToken) },
+		}
 	}
 	mode := "timer"
 	if c.Env.Serverless {
@@ -409,10 +411,7 @@ func (c *Camada) decideRequest(req *Req, body []byte) (*Answer, *Passed) {
 }
 
 func (c *Camada) event(req *Req, rid, sid string, newSession bool, ip string) map[string]any {
-	info := events.RequestInfo{Method: req.Method, Host: req.Host, Path: req.Path, Query: req.Query, Headers: req.Headers, IP: ip, HTTPVersion: req.HTTPVersion}
-	if c.tokenHasher != nil {
-		info.Token = &events.Token{Header: c.tokenHeader, Hash: c.tokenHasher}
-	}
+	info := events.RequestInfo{Method: req.Method, Host: req.Host, Path: req.Path, Query: req.Query, Headers: req.Headers, IP: ip, HTTPVersion: req.HTTPVersion, Token: c.token}
 	return events.BuildWireEvent(info, TAP, rid, sid, newSession, "")
 }
 

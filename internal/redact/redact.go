@@ -206,16 +206,33 @@ func BodyShape(obj any) map[string]int {
 	return out
 }
 
-// SchemeRE is the shared grammar for an Authorization scheme.
-var SchemeRE = regexp.MustCompile("^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,16}$")
+var schemeRE = regexp.MustCompile("^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,16}$")
 
-// Credential extracts a usable credential, returning "" for an absent or unusable value.
-// schemeSplit applies to Authorization only.
-func Credential(value string, schemeSplit bool) string {
+// AuthScheme returns the scheme prefix of an Authorization value, if present.
+func AuthScheme(value string) string {
+	sp := strings.IndexByte(value, ' ')
+	if sp > 0 && schemeRE.MatchString(value[:sp]) {
+		return value[:sp]
+	}
+	return ""
+}
+
+// SelectCredential tries the configured extra header before Authorization.
+func SelectCredential(first map[string]string, tokenHeader string) (string, bool) {
+	if tokenHeader != "" {
+		if v := credential(first[tokenHeader], false); v != "" {
+			return v, true
+		}
+	}
+	v := credential(first["authorization"], true)
+	return v, v != ""
+}
+
+func credential(value string, schemeSplit bool) string {
 	v := strings.Trim(value, " \t")
 	if schemeSplit {
-		if sp := strings.IndexByte(v, ' '); sp > 0 && SchemeRE.MatchString(v[:sp]) {
-			v = strings.TrimLeft(v[sp+1:], " \t")
+		if scheme := AuthScheme(v); scheme != "" {
+			v = strings.TrimLeft(v[len(scheme)+1:], " \t")
 		}
 	}
 	for i := 0; i < len(v); i++ {
