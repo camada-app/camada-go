@@ -16,8 +16,9 @@ jobs:
           path: camada-core
       - id: beacon
         run: |
-          v=$(tr -d '[:space:]' < camada-go/internal/beacon/version.txt)
-          [ -n "$v" ] || { echo "::error::no vendored beacon version in camada-go/internal/beacon/version.txt"; exit 1; }
+          f=camada-go/internal/beacon/version.txt
+          v=$(tr -d '[:space:]' < "$f")
+          [ -n "$v" ] || { echo "::error::no vendored beacon version in $f"; exit 1; }
           echo "ref=v$v" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
