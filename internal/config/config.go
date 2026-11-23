@@ -5,9 +5,46 @@ package config
 
 import (
 	"encoding/json"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+var tokenHeaderRE = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)
+
+// ResolveTokenHash honors the local option when set and otherwise requires an exact env opt-in.
+func ResolveTokenHash(option *bool, env string) bool {
+	if option != nil {
+		return *option
+	}
+	return env == "1"
+}
+
+// ResolveTokenHeader returns the chosen extra header name in lowercase, or "" if unset.
+// A malformed or forbidden name returns false so the caller can warn without logging the name.
+func ResolveTokenHeader(option, env string) (string, bool) {
+	name := option
+	if name == "" {
+		name = env
+	}
+	if name == "" {
+		return "", true
+	}
+	name = strings.Map(func(r rune) rune {
+		if r >= 'A' && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		return r
+	}, name)
+	switch name {
+	case "authorization", "cookie", "set-cookie":
+		return "", false
+	}
+	if !tokenHeaderRE.MatchString(name) {
+		return "", false
+	}
+	return name, true
+}
 
 // TrustedProxy mirrors the server-validated tenant config (edge-analyst src/tenant-config.js):
 // {mode: none} | {mode: hops, hops: N} | {mode: cidrs, cidrs: [...]} | {mode: vercel}.

@@ -5,7 +5,6 @@
 package events
 
 import (
-	"regexp"
 	"strings"
 	"time"
 
@@ -28,13 +27,15 @@ var hdrBit = func() map[string]int {
 	return m
 }()
 
-// A schemeless header (`Authorization: <raw token>`) has no safe prefix: the first "word" IS
-// the credential. Only a real auth-scheme token followed by a space ever ships.
-var schemeRE = regexp.MustCompile("^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,16}$")
-
 // Header is one request header in wire order; the name may carry any case.
 type Header struct {
 	Name, Value string
+}
+
+// Token configures optional credential hashing for a request row.
+type Token struct {
+	Header string // normalized extra header name, or "" for Authorization only
+	Hash   func(string) string
 }
 
 // RequestInfo is the normalized request the event is built from.
@@ -46,15 +47,17 @@ type RequestInfo struct {
 	Headers     []Header // in the order the host gives them
 	IP          string   // already resolved via trusted-proxy config; "" when unknown
 	HTTPVersion string   // e.g. "1.1"
+	Token       *Token   // nil to omit tk
 }
 
 // AuthScheme is the auth scheme of an Authorization value, never the credential.
+// Only a real auth-scheme token followed by a space ever ships.
 func AuthScheme(value string) string {
 	sp := strings.IndexByte(value, ' ')
 	if sp <= 0 {
 		return ""
 	}
-	if scheme := value[:sp]; schemeRE.MatchString(scheme) {
+	if scheme := value[:sp]; redact.SchemeRE.MatchString(scheme) {
 		return scheme
 	}
 	return ""
@@ -152,5 +155,28 @@ func BuildWireEvent(r RequestInfo, tap, rid, sid string, newSession bool, ja4 st
 	}
 	ev["st"] = nil
 	ev["dur"] = nil // 'dur': the collector wire already claims 'lat' for latitude
+	if r.Token != nil {
+		addTokenHash(ev, first, r.Token)
+	}
 	return ev
+}
+
+func addTokenHash(ev map[string]any, first map[string]string, token *Token) {
+	defer func() { _ = recover() }() // a panic must neither drop the row nor undo an enforcement decision
+	if token.Hash == nil {
+		return
+	}
+	var credential string
+	if token.Header != "" {
+		credential = redact.Credential(first[token.Header], false)
+	}
+	if credential == "" {
+		credential = redact.Credential(first["authorization"], true)
+	}
+	if credential == "" {
+		return
+	}
+	if hashed := token.Hash(credential); hashed != "" {
+		ev["tk"] = hashed
+	}
 }

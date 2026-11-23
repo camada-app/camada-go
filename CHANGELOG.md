@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add opt-in credential hashing (`tk`) on request rows and strip visitor-supplied `tk`, `bf`, and `upf` from relayed beacon rows. (camada-all-29aa)
+
 ## 0.2.0 (2026-10-26)
 
 - fix (security): a `[` inside a class is literal as in JS; `[[:alpha:]]` was read as a POSIX class, and `[[:x:]]` never matched. (camada-all-07c7)

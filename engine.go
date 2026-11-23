@@ -36,6 +36,7 @@ import (
 	"github.com/camada-app/camada-go/challenge"
 	"github.com/camada-app/camada-go/events"
 	"github.com/camada-app/camada-go/internal/beacon"
+	"github.com/camada-app/camada-go/internal/config"
 	"github.com/camada-app/camada-go/internal/guarded"
 	"github.com/camada-app/camada-go/snapshot"
 )
@@ -150,6 +151,8 @@ type Options struct {
 	Challenge       *bool             // serve the proof-of-work page for challenge verdicts; nil = true (CAMADA_CHALLENGE=0 also off)
 	ChallengePath   string            // where the page posts its solution; default /__camada/challenge
 	SnapshotVersion int               // 5 (default) asks for your custom rules; 4 the sides only; 3 opts out of both
+	TokenHash       *bool             // hash request credentials; nil uses CAMADA_TOKEN_HASH
+	TokenHeader     string            // extra credential header; empty uses CAMADA_TOKEN_HEADER
 }
 
 // Camada is the engine: one per process, built from the environment.
@@ -162,6 +165,8 @@ type Camada struct {
 
 	getenv      func(string) string
 	challengeOn bool
+	tokenHeader string
+	tokenHasher func(string) string
 	decide      func(req *Req, body []byte) (*Answer, *Passed)
 }
 
@@ -195,6 +200,15 @@ func New(o Options) *Camada {
 	}
 	if getenv(KillSwitchEnv) == "1" {
 		return c // killed at boot: no goroutines, no requests, truly silent
+	}
+	tokenHeader, valid := config.ResolveTokenHeader(o.TokenHeader, getenv("CAMADA_TOKEN_HEADER"))
+	if !valid {
+		guarded.WarnRateLimited("ignoring the extra token header because its name is invalid or forbidden")
+	}
+	c.tokenHeader = tokenHeader
+	if config.ResolveTokenHash(o.TokenHash, getenv("CAMADA_TOKEN_HASH")) {
+		ingestToken := c.Env.IngestToken
+		c.tokenHasher = func(credential string) string { return HashToken(credential, ingestToken) }
 	}
 	mode := "timer"
 	if c.Env.Serverless {
@@ -396,6 +410,9 @@ func (c *Camada) decideRequest(req *Req, body []byte) (*Answer, *Passed) {
 
 func (c *Camada) event(req *Req, rid, sid string, newSession bool, ip string) map[string]any {
 	info := events.RequestInfo{Method: req.Method, Host: req.Host, Path: req.Path, Query: req.Query, Headers: req.Headers, IP: ip, HTTPVersion: req.HTTPVersion}
+	if c.tokenHasher != nil {
+		info.Token = &events.Token{Header: c.tokenHeader, Hash: c.tokenHasher}
+	}
 	return events.BuildWireEvent(info, TAP, rid, sid, newSession, "")
 }
 

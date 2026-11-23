@@ -206,10 +206,42 @@ func BodyShape(obj any) map[string]int {
 	return out
 }
 
+// SchemeRE is the shared grammar for an Authorization scheme.
+var SchemeRE = regexp.MustCompile("^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,16}$")
+
+// Credential extracts a usable credential, returning "" for an absent or unusable value.
+// schemeSplit applies to Authorization only.
+func Credential(value string, schemeSplit bool) string {
+	v := strings.Trim(value, " \t")
+	if schemeSplit {
+		if sp := strings.IndexByte(v, ' '); sp > 0 && SchemeRE.MatchString(v[:sp]) {
+			v = strings.TrimLeft(v[sp+1:], " \t")
+		}
+	}
+	for i := 0; i < len(v); i++ {
+		if v[i] < 0x20 || v[i] > 0x7e {
+			return ""
+		}
+	}
+	if len(v) < 8 {
+		return ""
+	}
+	return v
+}
+
 // HashUserID is a stable per-tenant pseudonym: HMAC-SHA256 keyed by the ingest token, labelled so
 // the hash can never double as anything else, truncated to 32 hex chars. The raw identifier never leaves.
 func HashUserID(userID, ingestToken string) string {
+	return hashPseudonym("uid:"+userID, ingestToken)
+}
+
+// HashToken is the 32-hex, ingest-token-keyed HMAC of the credential with the tok: prefix.
+func HashToken(credential, ingestToken string) string {
+	return hashPseudonym("tok:"+credential, ingestToken)
+}
+
+func hashPseudonym(message, ingestToken string) string {
 	m := hmac.New(sha256.New, []byte(ingestToken))
-	m.Write([]byte("uid:" + userID))
-	return hex.EncodeToString(m.Sum(nil))[:32]
+	m.Write([]byte(message))
+	return hex.EncodeToString(m.Sum(nil)[:16])
 }
