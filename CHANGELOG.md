@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- fix: the "CAMADA_KEY not set — camada is inactive" boot line is now a config warning, not a "suppressed error (SDK fails open)" line, so it no longer uses up the fail-open error budget. (camada-all-84fr)
 - Add opt-in credential hashing (`tk`) on request rows and strip visitor-supplied `tk`, `bf`, and `upf` from relayed beacon rows. (camada-all-29aa)
 
 ## 0.2.0 (2026-10-26)

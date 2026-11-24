@@ -195,7 +195,7 @@ func New(o Options) *Camada {
 	c.challengeOn = (o.Challenge == nil || *o.Challenge) && getenv("CAMADA_CHALLENGE") != "0"
 	c.Env = resolveEnv(getenv)
 	if c.Env == nil {
-		guarded.LogRateLimited("CAMADA_KEY (or CAMADA_TOKEN + CAMADA_SNAPSHOT_TOKEN) not set — camada is inactive")
+		guarded.WarnRateLimited("CAMADA_KEY (or CAMADA_TOKEN + CAMADA_SNAPSHOT_TOKEN) not set — camada is inactive")
 		return c
 	}
 	if getenv(KillSwitchEnv) == "1" {

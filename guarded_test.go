@@ -21,3 +21,18 @@ func TestLogRateLimitedWritesOneLineAMinute(t *testing.T) {
 		t.Fatalf("%q", out)
 	}
 }
+
+func TestUnconfiguredBootWarnsWithoutSpendingTheErrorBudget(t *testing.T) {
+	var buf bytes.Buffer
+	SetLogger(log.New(&buf, "", 0))
+	t.Cleanup(func() { SetLogger(log.Default()) })
+	guarded.Reset()
+	New(Options{Env: map[string]string{}})
+	LogRateLimited("sdk bug")
+	out := buf.String()
+	if !strings.Contains(out, "[camada] warning: CAMADA_KEY (or CAMADA_TOKEN + CAMADA_SNAPSHOT_TOKEN) not set") ||
+		strings.Contains(strings.SplitN(out, "\n", 2)[0], "suppressed error") ||
+		!strings.Contains(out, "[camada] suppressed error (SDK fails open): sdk bug") {
+		t.Fatalf("%q", out)
+	}
+}
