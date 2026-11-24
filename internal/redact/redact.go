@@ -33,16 +33,32 @@ func suspectValue(v string) bool {
 	return jwtRE.MatchString(v) || hexRE.MatchString(v) || b64RE.MatchString(v)
 }
 
+// ASCIILower lowercases ASCII letters and preserves all other bytes.
+func ASCIILower(s string) string {
+	i := 0
+	for i < len(s) && (s[i] < 'A' || s[i] > 'Z') {
+		i++
+	}
+	if i == len(s) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	b.WriteString(s[:i])
+	for ; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
 // nameHit is core's NAME_RE (`pass(word)?|tok(en)?|secret|key|api[-_]?key|auth|sess(ion)?|sig(nature)?|code|jwt|
 // bearer|credential`, unanchored, case-insensitive) in its ASCII-only form: lowercase A-Z, then a substring test.
 func nameHit(n string) bool {
-	b := []byte(n)
-	for i, c := range b {
-		if c >= 'A' && c <= 'Z' {
-			b[i] = c + 32
-		}
-	}
-	lower := string(b)
+	lower := ASCIILower(n)
 	for _, w := range nameWords {
 		if strings.Contains(lower, w) {
 			return true

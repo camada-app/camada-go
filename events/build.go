@@ -74,22 +74,6 @@ func truncRunes(s string, n int) string {
 	return string(r[:n])
 }
 
-func asciiLower(s string) string {
-	var lower []byte
-	for i := 0; i < len(s); i++ {
-		if c := s[i]; c >= 'A' && c <= 'Z' {
-			if lower == nil {
-				lower = []byte(s)
-			}
-			lower[i] = c + ('a' - 'A')
-		}
-	}
-	if lower == nil {
-		return s
-	}
-	return string(lower)
-}
-
 // BuildWireEvent is the mutable wire event; the caller fills st/dur on response-finish before
 // enqueueing. A "" sid or ip ships as null.
 func BuildWireEvent(r RequestInfo, tap, rid, sid string, newSession bool, ja4 string) map[string]any {
@@ -98,7 +82,7 @@ func BuildWireEvent(r RequestInfo, tap, rid, sid string, newSession bool, ja4 st
 	names := make([]string, 0, len(r.Headers))
 	first := make(map[string]string, len(r.Headers))
 	for _, h := range r.Headers {
-		k := asciiLower(h.Name)
+		k := redact.ASCIILower(h.Name)
 		hn++
 		hb += len(h.Name) + len(h.Value)
 		names = append(names, k)
