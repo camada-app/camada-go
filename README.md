@@ -239,13 +239,11 @@ The suite reads the golden snapshot fixtures from the `camada-core` sibling chec
 (`CAMADA_FIXTURES_DIR` overrides) and pins the embedded beacon to
 `camada-browser/dist/auto.global.js` (`CAMADA_BROWSER_DIST` overrides; check out the beacon
 release tag there, run `npm run build`, then run `go run ./scripts/sync-beacon`). Both fail by
-name when the checkout is missing rather than skipping.
-
-CI checks out the `camada-core` commit pinned by `ref:` in `.github/workflows/ci.yml`, so fixture
-changes on `camada-core` main won't affect CI. Local runs still pick up changes in the sibling
-checkout, which usually follows `main`. When this SDK needs new or changed fixtures, push the
-`camada-core` commit with those fixtures to `main` first, then set `ref:` to its full SHA in
-the same commit as the SDK changes.
+name when the checkout is missing rather than skipping. CI checks out `camada-core` at the commit
+pinned by `ref:` in `.github/workflows/ci.yml`, so a fixture change on camada-core main cannot
+turn this CI red; local runs use the sibling checkout as it is. To take new fixtures, push them to
+camada-core main first, then set `ref:` to that commit's full SHA in the same commit as the SDK
+change.
 
 [`camada-go-example`](https://github.com/camada-app/camada-go-example) is the hand-test bench (net/http on :3003), and
 `node scripts/e2e-sdk-go.mjs` in `camada/edge-analyst` drives it against a seeded local analyst
