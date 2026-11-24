@@ -50,6 +50,14 @@ func TestRequestMapping(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderNamesAreLowercasedASCIIOnly(t *testing.T) {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header["X-Api-\u212Aey"] = []string{"fake-token-0001"}
+	if got, ok := reqFromHTTP(r).Header("x-api-\u212Aey"); !ok || got != "fake-token-0001" {
+		t.Fatalf("header x-api-\u212Aey = %q (present = %t)", got, ok)
+	}
+}
+
 // C6 v3 peer table, net/http: a unix-socket listener is no peer (the cidrs walk runs over XFF alone); a RemoteAddr
 // SplitHostPort cannot split, or "@", on a TCP listener could not be read and resolves to no ip. A request with no
 // local address at all (a Lambda/API Gateway shim, http.NewRequest) has no socket: "" is no peer and walks, and any

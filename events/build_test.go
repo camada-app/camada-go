@@ -147,6 +147,24 @@ func TestTokenUsesTheFirstValuePerHeader(t *testing.T) {
 	}
 }
 
+func TestTokenHeaderNamesAreLowercasedASCIIOnly(t *testing.T) {
+	info := req([]Header{{"X-Api-\u212Aey", "fake-token-0001"}}, "", "")
+	info.Token = &Token{Header: "x-api-key", Hash: func(string) string {
+		return strings.Repeat("a", 32)
+	}}
+
+	ev := BuildWireEvent(info, "sdk-go", "r", "", false, "")
+	if _, ok := ev["tk"]; ok || ev["hord"] != "x-api-\u212Aey" {
+		t.Fatalf("tk = %v, hord = %q", ev["tk"], ev["hord"])
+	}
+
+	info.Headers[0].Name = "X-Api-Key"
+	ev = BuildWireEvent(info, "sdk-go", "r", "", false, "")
+	if ev["tk"] != strings.Repeat("a", 32) || ev["hord"] != "x-api-key" {
+		t.Fatalf("tk = %v, hord = %q", ev["tk"], ev["hord"])
+	}
+}
+
 func TestTokenHasherPanicKeepsTheRequestRow(t *testing.T) {
 	info := req([]Header{{"Authorization", "Bearer fake-token"}}, "", "")
 	info.Token = &Token{Hash: func(value string) string { panic(value) }}

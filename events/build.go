@@ -82,7 +82,7 @@ func BuildWireEvent(r RequestInfo, tap, rid, sid string, newSession bool, ja4 st
 	names := make([]string, 0, len(r.Headers))
 	first := make(map[string]string, len(r.Headers))
 	for _, h := range r.Headers {
-		k := strings.ToLower(h.Name)
+		k := redact.ASCIILower(h.Name)
 		hn++
 		hb += len(h.Name) + len(h.Value)
 		names = append(names, k)

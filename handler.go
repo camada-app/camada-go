@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/camada-app/camada-go/internal/guarded"
+	"github.com/camada-app/camada-go/internal/redact"
 )
 
 type ctxKey struct{}
@@ -118,7 +119,7 @@ func reqFromHTTP(r *http.Request) *Req {
 	sort.Strings(names) // a map has no wire order; sorted is at least stable
 	for _, name := range names {
 		for _, v := range r.Header[name] {
-			headers = append(headers, hdr(strings.ToLower(name), v))
+			headers = append(headers, hdr(redact.ASCIILower(name), v))
 		}
 	}
 	query := ""
